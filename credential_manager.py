@@ -263,6 +263,13 @@ class CredentialManager:
                 return cred
         return None
     
+    def find_by_ip(self, ip_address: str) -> Optional[Dict]:
+        """Find credential by IP address."""
+        for cred in self.credentials:
+            if cred.get('ip_address', '').lower() == ip_address.lower():
+                return cred
+        return None
+    
     def search(self, query: str) -> List[Dict]:
         """Search credentials by any field."""
         query = query.lower()

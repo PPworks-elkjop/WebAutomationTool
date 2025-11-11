@@ -1,0 +1,67 @@
+[2025-11-11 07:52:41.232180] ==================================================
+[2025-11-11 07:52:41.238004] ESL AP Helper Startup Diagnostic
+[2025-11-11 07:52:41.238651] Python: 3.13.9 (tags/v3.13.9:8183fa5, Oct 14 2025, 14:09:13) [MSC v.1944 64 bit (AMD64)]
+[2025-11-11 07:52:41.239249] Working dir: C:\Users\PeterAndersson\GitHubVSCode\WebAutomationTool
+[2025-11-11 07:52:41.239657] 
+1. Testing tkinter...
+[2025-11-11 07:54:05.431659] ==================================================
+[2025-11-11 07:54:05.433012] ESL AP Helper Startup Diagnostic
+[2025-11-11 07:54:05.433914] Python: 3.13.9 (tags/v3.13.9:8183fa5, Oct 14 2025, 14:09:13) [MSC v.1944 64 bit (AMD64)]
+[2025-11-11 07:54:05.434571] Working dir: C:\Users\PeterAndersson\GitHubVSCode\WebAutomationTool
+[2025-11-11 07:54:05.435121] 
+1. Testing tkinter...
+[2025-11-11 07:54:05.458819]    ✓ tkinter imported
+[2025-11-11 07:54:05.459581] 
+2. Testing user_manager...
+[2025-11-11 07:54:05.959283]    ✓ UserManager loaded (1 users)
+[2025-11-11 07:54:05.960124] 
+3. Testing login_dialog...
+[2025-11-11 07:54:05.989604]    ✓ LoginDialog imported
+[2025-11-11 07:54:05.990495] 
+4. Creating root window...
+[2025-11-11 07:54:06.058296]    ✓ Root window created
+[2025-11-11 07:54:06.059702] 
+5. Showing login dialog...
+[2025-11-11 07:54:06.094472]    ✓ Login dialog created
+[2025-11-11 07:56:28.884050] ==================================================
+[2025-11-11 07:56:28.885212] ESL AP Helper Startup Diagnostic
+[2025-11-11 07:56:28.886119] Python: 3.13.9 (tags/v3.13.9:8183fa5, Oct 14 2025, 14:09:13) [MSC v.1944 64 bit (AMD64)]
+[2025-11-11 07:56:28.887099] Working dir: C:\Users\PeterAndersson\GitHubVSCode\WebAutomationTool
+[2025-11-11 07:56:28.887793] 
+1. Testing tkinter...
+[2025-11-11 07:56:28.914770]    ✓ tkinter imported
+[2025-11-11 07:56:28.915977] 
+2. Testing user_manager...
+[2025-11-11 07:56:28.946904]    ✓ UserManager loaded (1 users)
+[2025-11-11 07:56:28.947596] 
+3. Testing login_dialog...
+[2025-11-11 07:56:28.972517]    ✓ LoginDialog imported
+[2025-11-11 07:56:28.973550] 
+4. Creating root window...
+[2025-11-11 07:56:29.024283]    ✓ Root window created
+[2025-11-11 07:56:29.025604] 
+5. Showing login dialog...
+[2025-11-11 07:56:29.061299]    ✓ Login dialog created
+[2025-11-11 07:57:45.826680] ==================================================
+[2025-11-11 07:57:45.827938] ESL AP Helper Startup Diagnostic
+[2025-11-11 07:57:45.829104] Python: 3.13.9 (tags/v3.13.9:8183fa5, Oct 14 2025, 14:09:13) [MSC v.1944 64 bit (AMD64)]
+[2025-11-11 07:57:45.829930] Working dir: C:\Users\PeterAndersson\GitHubVSCode\WebAutomationTool
+[2025-11-11 07:57:45.830623] 
+1. Testing tkinter...
+[2025-11-11 07:57:45.859290]    ✓ tkinter imported
+[2025-11-11 07:57:45.860822] 
+2. Testing user_manager...
+[2025-11-11 07:57:45.899378]    ✓ UserManager loaded (1 users)
+[2025-11-11 07:57:45.900583] 
+3. Testing login_dialog...
+[2025-11-11 07:57:45.923179]    ✓ LoginDialog imported
+[2025-11-11 07:57:45.924043] 
+4. Creating root window...
+[2025-11-11 07:57:46.000643]    ✓ Root window created
+[2025-11-11 07:57:46.002322] 
+5. Showing login dialog...
+[2025-11-11 07:57:46.119628]    ✓ Login dialog created
+[2025-11-11 07:58:22.744978] 
+✓ Login successful: MasterBlaster
+[2025-11-11 07:58:22.747352] 
+Test completed successfully

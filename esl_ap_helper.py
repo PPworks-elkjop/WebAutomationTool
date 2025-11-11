@@ -48,18 +48,13 @@ def save_settings(settings):
     except:
         pass
 
-class WebAutomationWorker(threading.Thread):
-    """Worker thread for web automation tasks."""
-    def __init__(self, ip_address, username, password, task_type, progress_callback, finished_callback, stop_event):
-        super().__init__(daemon=True)
-        self.ip_address = ip_address
-        self.username = username
-        self.password = password
-        self.task_type = task_type
+class WebAutomationWorker:
+    """Worker for web automation tasks - maintains persistent browser."""
+    def __init__(self, progress_callback, log_callback):
         self.progress = progress_callback
-        self.finished = finished_callback
-        self.stop_event = stop_event
+        self.log = log_callback
         self.driver = None
+        self.is_logged_in = False
         
     def run(self):
         try:
@@ -355,19 +350,19 @@ class App:
         
         # IP Address
         ttk.Label(conn_frame, text="IP Address:", style="Modern.TLabel").grid(row=0, column=0, sticky="w", padx=(0, 10))
-        self.ip_var = tk.StringVar(value=self.settings.get("last_ip", ""))
+        self.ip_var = tk.StringVar(value=self.settings.get("last_ip", "192.168.1.207"))
         ip_entry = ttk.Entry(conn_frame, textvariable=self.ip_var, width=20, style="Modern.TEntry", font=("Segoe UI", 10))
         ip_entry.grid(row=0, column=1, sticky="w", padx=5)
         
         # Username
         ttk.Label(conn_frame, text="Username:", style="Modern.TLabel").grid(row=0, column=2, sticky="w", padx=(20, 10))
-        self.username_var = tk.StringVar(value=self.settings.get("last_username", ""))
+        self.username_var = tk.StringVar(value=self.settings.get("last_username", "admin"))
         username_entry = ttk.Entry(conn_frame, textvariable=self.username_var, width=20, style="Modern.TEntry", font=("Segoe UI", 10))
         username_entry.grid(row=0, column=3, sticky="w", padx=5)
         
         # Password
         ttk.Label(conn_frame, text="Password:", style="Modern.TLabel").grid(row=1, column=0, sticky="w", padx=(0, 10), pady=(10, 0))
-        self.password_var = tk.StringVar(value=self.settings.get("last_password", ""))
+        self.password_var = tk.StringVar(value=self.settings.get("last_password", ">77JssNCfk"))
         password_entry = ttk.Entry(conn_frame, textvariable=self.password_var, width=20, show="*", style="Modern.TEntry", font=("Segoe UI", 10))
         password_entry.grid(row=1, column=1, sticky="w", padx=5, pady=(10, 0))
         
@@ -385,15 +380,29 @@ class App:
         btn_frame = ttk.Frame(ops_frame, style="Modern.TFrame")
         btn_frame.pack(fill="x")
         
-        # Check Provisioning button
-        self.provisioning_btn = ttk.Button(btn_frame, text="Check Provisioning Status", 
-                                          command=lambda: self._start_task("check_provisioning"), 
+        # Step 1: Open Browser button
+        self.open_browser_btn = ttk.Button(btn_frame, text="1. Open Browser", 
+                                          command=lambda: self._start_task("open_browser"), 
                                           style="Modern.TButton")
-        self.provisioning_btn.pack(side="left", padx=(0, 10))
+        self.open_browser_btn.pack(side="left", padx=(0, 10))
         
-        # Cancel button
-        self.cancel_btn = ttk.Button(btn_frame, text="Cancel", command=self._on_cancel, state="disabled", style="Modern.TButton")
-        self.cancel_btn.pack(side="left", padx=(0, 10))
+        # Step 2: Login button
+        self.login_btn = ttk.Button(btn_frame, text="2. Login", 
+                                    command=lambda: self._start_task("login"), 
+                                    state="disabled", style="Modern.TButton")
+        self.login_btn.pack(side="left", padx=(0, 10))
+        
+        # Step 3: Check Provisioning button
+        self.check_provisioning_btn = ttk.Button(btn_frame, text="3. Check Provisioning", 
+                                                command=lambda: self._start_task("check_provisioning"), 
+                                                state="disabled", style="Modern.TButton")
+        self.check_provisioning_btn.pack(side="left", padx=(0, 10))
+        
+        # Close Browser button
+        self.close_browser_btn = ttk.Button(btn_frame, text="Close Browser", 
+                                           command=self._close_browser, 
+                                           state="disabled", style="Modern.TButton")
+        self.close_browser_btn.pack(side="left", padx=(0, 10))
         
         # Save Settings button
         ttk.Button(btn_frame, text="Save Settings", command=self._save_settings, style="Modern.TButton").pack(side="right")

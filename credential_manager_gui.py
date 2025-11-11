@@ -8,13 +8,20 @@ from pathlib import Path
 from credential_manager import CredentialManager
 
 class CredentialManagerGUI:
-    def __init__(self, parent=None):
+    def __init__(self, current_user=None, parent=None):
+        self.current_user = current_user
+        
         if parent:
             self.root = tk.Toplevel(parent)
         else:
             self.root = tk.Tk()
         
-        self.root.title("ESL AP Credential Manager")
+        # Set title with user context if available
+        if current_user:
+            self.root.title(f"ESL AP Credential Manager - {current_user['full_name']} ({current_user['role']})")
+        else:
+            self.root.title("ESL AP Credential Manager")
+        
         self.root.geometry("1200x700")
         
         self.credential_manager = CredentialManager()
@@ -344,7 +351,24 @@ class CredentialDialog:
 
 
 def main():
+    from login_dialog import LoginDialog
+    import tkinter as tk
+    
+    # Show login dialog first (it creates its own Tk window)
+    login = LoginDialog()
+    current_user = login.show()
+    
+    if not current_user:
+        # User cancelled login
+        login.get_root().destroy()
+        return
+    
+    # Destroy login window and create new one for credential manager
+    login.get_root().destroy()
+    
+    # Show credential manager
     app = CredentialManagerGUI()
+    app.root.title(f"Credential Manager - {current_user['full_name']} ({current_user['role']})")
     app.root.mainloop()
 
 

@@ -1,0 +1,61 @@
+[
+  {
+    "timestamp": "21:17:52.472",
+    "type": "RECORDING_STARTED",
+    "data": {
+      "url": "https://192.168.1.207/",
+      "title": "",
+      "timestamp": "21:17:52"
+    }
+  },
+  {
+    "timestamp": "21:17:53.081",
+    "type": "CONSOLE_LOG",
+    "data": {
+      "level": "SEVERE",
+      "message": "chrome-error://chromewebdata/ - Failed to load resource: the server responded with a status of 401 ()",
+      "source": "network"
+    }
+  },
+  {
+    "timestamp": "21:18:24.781",
+    "type": "TITLE_CHANGE",
+    "data": {
+      "from": "",
+      "to": "imagotag Access Point"
+    }
+  },
+  {
+    "timestamp": "21:18:35.839",
+    "type": "URL_CHANGE",
+    "data": {
+      "from": "https://192.168.1.207/",
+      "to": "https://192.168.1.207/admin.xml"
+    }
+  },
+  {
+    "timestamp": "21:18:35.876",
+    "type": "TITLE_CHANGE",
+    "data": {
+      "from": "imagotag Access Point",
+      "to": "imagotag Access Point Administration"
+    }
+  },
+  {
+    "timestamp": "21:18:39.572",
+    "type": "URL_CHANGE",
+    "data": {
+      "from": "https://192.168.1.207/admin.xml",
+      "to": "https://192.168.1.207/service/config/provisioningEnabled.xml"
+    }
+  },
+  {
+    "timestamp": "21:19:42.254",
+    "type": "RECORDING_STOPPED",
+    "data": {
+      "url": "https://192.168.1.207/service/config/provisioningEnabled.xml",
+      "title": "imagotag Access Point Administration",
+      "timestamp": "21:19:42"
+    }
+  }
+]
