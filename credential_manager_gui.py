@@ -5,7 +5,7 @@ ESL AP Credential Manager GUI - Manage, search, import/export AP credentials
 import tkinter as tk
 from tkinter import ttk, messagebox, filedialog
 from pathlib import Path
-from credential_manager import CredentialManager
+from credential_manager_v2 import CredentialManager
 
 class CredentialManagerGUI:
     def __init__(self, current_user=None, parent=None):

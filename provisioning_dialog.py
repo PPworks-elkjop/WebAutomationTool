@@ -16,6 +16,10 @@ class ProvisioningDialog:
         self.dialog.geometry("400x320")
         self.dialog.transient(parent)
         self.dialog.grab_set()
+        # Ensure dialog appears on top
+        self.dialog.lift()
+        self.dialog.attributes('-topmost', True)
+        self.dialog.after(100, lambda: self.dialog.attributes('-topmost', False))
         
         # Configure style
         style = ttk.Style()

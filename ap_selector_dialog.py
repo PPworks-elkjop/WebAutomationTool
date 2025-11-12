@@ -2,7 +2,7 @@
 
 import tkinter as tk
 from tkinter import ttk, messagebox
-from credential_manager import CredentialManager
+from credential_manager_v2 import CredentialManager
 
 
 class APSelectorDialog:

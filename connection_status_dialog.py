@@ -4,25 +4,35 @@ from tkinter import ttk
 class ConnectionStatusDialog:
     """Dialog showing real-time connection status for multiple APs."""
     
-    def __init__(self, parent, ap_list):
+    def __init__(self, parent, ap_list, provisioning_callback=None, ssh_callback=None, 
+                 close_browser_callback=None, ping_selected_callback=None):
         """Initialize the connection status dialog.
         
         Args:
             parent: Parent window
             ap_list: List of AP dictionaries to display
+            provisioning_callback: Callback for Provisioning button
+            ssh_callback: Callback for SSH button
+            close_browser_callback: Callback for Close Browser button
+            ping_selected_callback: Callback for Ping Selected button (receives list of selected APs)
         """
         self.dialog = tk.Toplevel(parent)
         self.dialog.title("Connection Status")
-        self.dialog.geometry("900x600")
+        self.dialog.geometry("900x650")
         self.dialog.configure(bg="#FFFFFF")
         
         # Make it non-modal (stay on top but don't block interaction)
         self.dialog.transient(parent)
-        self.dialog.attributes('-topmost', True)
+        # Don't use grab_set() to allow interaction with other windows
+        # Don't use topmost to avoid blocking other windows
         
-        # Store AP list
+        # Store AP list and callbacks
         self.ap_list = ap_list
         self.ap_rows = {}  # Map ap_id to tree item
+        self.provisioning_callback = provisioning_callback
+        self.ssh_callback = ssh_callback
+        self.close_browser_callback = close_browser_callback
+        self.ping_selected_callback = ping_selected_callback
         
         self._create_ui()
         self._populate_aps()
@@ -30,8 +40,8 @@ class ConnectionStatusDialog:
         # Center the dialog
         self.dialog.update_idletasks()
         x = (self.dialog.winfo_screenwidth() // 2) - (900 // 2)
-        y = (self.dialog.winfo_screenheight() // 2) - (600 // 2)
-        self.dialog.geometry(f"900x600+{x}+{y}")
+        y = (self.dialog.winfo_screenheight() // 2) - (650 // 2)
+        self.dialog.geometry(f"900x650+{x}+{y}")
     
     def _create_ui(self):
         """Create the UI elements."""
@@ -115,7 +125,90 @@ class ConnectionStatusDialog:
         )
         self.summary_label.pack(pady=10)
         
-        # Button frame
+        # Action button frame (for Provisioning, SSH, Close Browser, Ping Selected)
+        action_frame = tk.Frame(self.dialog, bg="#FFFFFF")
+        action_frame.pack(pady=5)
+        
+        # Provisioning button
+        if self.provisioning_callback:
+            self.provisioning_btn = tk.Button(
+                action_frame,
+                text="Provisioning",
+                command=self._on_provisioning,
+                font=("Segoe UI", 10),
+                bg="#FFC107",
+                fg="white",
+                activebackground="#E0A800",
+                width=12,
+                cursor="hand2",
+                relief="flat",
+                bd=0,
+                padx=10,
+                pady=5,
+                state="disabled"
+            )
+            self.provisioning_btn.pack(side="left", padx=5)
+        
+        # SSH button
+        if self.ssh_callback:
+            self.ssh_btn = tk.Button(
+                action_frame,
+                text="SSH",
+                command=self._on_ssh,
+                font=("Segoe UI", 10),
+                bg="#17A2B8",
+                fg="white",
+                activebackground="#138496",
+                width=12,
+                cursor="hand2",
+                relief="flat",
+                bd=0,
+                padx=10,
+                pady=5,
+                state="disabled"
+            )
+            self.ssh_btn.pack(side="left", padx=5)
+        
+        # Close Browser button
+        if self.close_browser_callback:
+            self.close_browser_btn = tk.Button(
+                action_frame,
+                text="Close Browser",
+                command=self._on_close_browser,
+                font=("Segoe UI", 10),
+                bg="#6C757D",
+                fg="white",
+                activebackground="#5A6268",
+                width=12,
+                cursor="hand2",
+                relief="flat",
+                bd=0,
+                padx=10,
+                pady=5,
+                state="disabled"
+            )
+            self.close_browser_btn.pack(side="left", padx=5)
+        
+        # Ping Selected button
+        if self.ping_selected_callback:
+            self.ping_selected_btn = tk.Button(
+                action_frame,
+                text="Ping Selected",
+                command=self._on_ping_selected,
+                font=("Segoe UI", 10),
+                bg="#28A745",
+                fg="white",
+                activebackground="#218838",
+                width=12,
+                cursor="hand2",
+                relief="flat",
+                bd=0,
+                padx=10,
+                pady=5
+            )
+            self.ping_selected_btn.pack(side="left", padx=5)
+        
+        # Button frame (for Export and Hide)
         button_frame = tk.Frame(self.dialog, bg="#FFFFFF")
         button_frame.pack(pady=10)
         
@@ -128,7 +221,10 @@ class ConnectionStatusDialog:
             bg="#007BFF",
             fg="white",
             width=18,
-            height=2
+            height=2,
+            cursor="hand2",
+            relief="raised",
+            bd=2
         )
         self.export_button.pack(side="left", padx=5)
         
@@ -141,7 +237,10 @@ class ConnectionStatusDialog:
             bg="#6C757D",
             fg="white",
             width=15,
-            height=2
+            height=2,
+            cursor="hand2",
+            relief="raised",
+            bd=2
         )
         self.close_button.pack(side="left", padx=5)
     
@@ -379,7 +478,7 @@ class ConnectionStatusDialog:
                 self.tooltip = tk.Toplevel(self.dialog)
                 self.tooltip.wm_overrideredirect(True)
                 self.tooltip.wm_geometry(f"+{x}+{y}")
-                # Keep tooltip above everything
+                # Tooltip should be above other windows
                 self.tooltip.attributes('-topmost', True)
                 
                 label = tk.Label(
@@ -409,6 +508,67 @@ class ConnectionStatusDialog:
             except:
                 pass
             self.tooltip = None
+    
+    def _on_provisioning(self):
+        """Handle Provisioning button click."""
+        if self.provisioning_callback:
+            self.provisioning_callback()
+    
+    def _on_ssh(self):
+        """Handle SSH button click."""
+        if self.ssh_callback:
+            self.ssh_callback()
+    
+    def _on_close_browser(self):
+        """Handle Close Browser button click."""
+        if self.close_browser_callback:
+            self.close_browser_callback()
+    
+    def _on_ping_selected(self):
+        """Handle Ping Selected button click."""
+        if self.ping_selected_callback:
+            # Get selected APs from the tree
+            selected_items = self.tree.selection()
+            if not selected_items:
+                from tkinter import messagebox
+                messagebox.showinfo("No Selection", "Please select one or more APs from the list.", parent=self.dialog)
+                return
+            
+            # Extract AP information from selected items
+            selected_aps = []
+            for item in selected_items:
+                values = self.tree.item(item, "values")
+                if len(values) >= 3:
+                    # Find the full AP info from the original list
+                    ap_id = values[1]
+                    ip_address = values[2]
+                    
+                    # Find matching AP in original list
+                    for ap in self.ap_list:
+                        if ap.get('ap_id') == ap_id or ap.get('ip_address') == ip_address:
+                            selected_aps.append(ap)
+                            break
+            
+            if selected_aps:
+                self.ping_selected_callback(selected_aps)
+    
+    def enable_action_buttons(self):
+        """Enable the action buttons (Provisioning, SSH, Close Browser)."""
+        if hasattr(self, 'provisioning_btn'):
+            self.provisioning_btn.config(state="normal")
+        if hasattr(self, 'ssh_btn'):
+            self.ssh_btn.config(state="normal")
+        if hasattr(self, 'close_browser_btn'):
+            self.close_browser_btn.config(state="normal")
+    
+    def disable_action_buttons(self):
+        """Disable the action buttons (Provisioning, SSH, Close Browser)."""
+        if hasattr(self, 'provisioning_btn'):
+            self.provisioning_btn.config(state="disabled")
+        if hasattr(self, 'ssh_btn'):
+            self.ssh_btn.config(state="disabled")
+        if hasattr(self, 'close_browser_btn'):
+            self.close_browser_btn.config(state="disabled")
     
     def destroy(self):
         """Destroy the dialog."""

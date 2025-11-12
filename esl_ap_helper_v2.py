@@ -14,6 +14,8 @@ import json
 import time
 from datetime import datetime
 from datetime import datetime
+import subprocess
+import platform
 
 # Selenium imports
 try:
@@ -31,8 +33,9 @@ except ImportError:
 # Import custom dialogs
 from connection_status_dialog import ConnectionStatusDialog
 
-APP_NAME = "ESL AP Helper"
-APP_VERSION = "0.3"
+APP_NAME = "VERA"
+APP_TAGLINE = "Vusion support with a human touch"
+APP_VERSION = "0.4"
 APP_RELEASE_DATE = "2025-11-12"
 SETTINGS_FILE = Path.home() / f".{APP_NAME.replace(' ', '_').lower()}_settings.json"
 
@@ -54,9 +57,47 @@ def save_settings(settings):
     except:
         pass
 
+def ping_host(ip_address, timeout=1):
+    """
+    Ping a host and return True if reachable, False otherwise.
+    Works on Windows, Linux, and Mac.
+    
+    Args:
+        ip_address: IP address or hostname to ping
+        timeout: Timeout in seconds (default 1)
+    
+    Returns:
+        tuple: (success: bool, response_time: float or None)
+    """
+    try:
+        # Determine ping command based on OS
+        param = '-n' if platform.system().lower() == 'windows' else '-c'
+        timeout_param = '-w' if platform.system().lower() == 'windows' else '-W'
+        
+        # Build ping command
+        command = ['ping', param, '1', timeout_param, str(timeout * 1000 if platform.system().lower() == 'windows' else timeout), ip_address]
+        
+        # Execute ping
+        start_time = time.time()
+        result = subprocess.run(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=timeout + 1)
+        response_time = (time.time() - start_time) * 1000  # Convert to ms
+        
+        # Check if ping was successful
+        if result.returncode == 0:
+            return (True, round(response_time, 2))
+        else:
+            return (False, None)
+            
+    except subprocess.TimeoutExpired:
+        return (False, None)
+    except Exception as e:
+        return (False, None)
+
 class WebAutomationWorker:
     """Worker for web automation tasks - maintains persistent browser."""
-    def __init__(self, progress_callback, log_callback, parent_window=None):
+    def __init__(self, progress_callback, log_callback, parent_window=None, 
+                 provisioning_callback=None, ssh_callback=None, 
+                 close_browser_callback=None, ping_selected_callback=None):
         self.progress = progress_callback
         self.log = log_callback
         self.parent_window = parent_window
@@ -65,6 +106,10 @@ class WebAutomationWorker:
         self.recording = False
         self.recorded_events = []
         self.status_dialog = None
+        self.provisioning_callback = provisioning_callback
+        self.ssh_callback = ssh_callback
+        self.close_browser_callback = close_browser_callback
+        self.ping_selected_callback = ping_selected_callback
     
     def handle_cato_warning(self):
         """Check for and handle Cato Networks warning page.
@@ -244,7 +289,14 @@ class WebAutomationWorker:
             
             # Create status dialog
             if self.parent_window:
-                self.status_dialog = ConnectionStatusDialog(self.parent_window, ap_list)
+                self.status_dialog = ConnectionStatusDialog(
+                    self.parent_window, 
+                    ap_list,
+                    provisioning_callback=self.provisioning_callback,
+                    ssh_callback=self.ssh_callback,
+                    close_browser_callback=self.close_browser_callback,
+                    ping_selected_callback=self.ping_selected_callback
+                )
             
             self.progress("Initializing browser...", 5)
             
@@ -2125,17 +2177,191 @@ class WebAutomationWorker:
             self.log(f"ERROR: {error_msg}")
             return {"status": "error", "message": error_msg}
 
+class AboutDialog:
+    """About dialog with application information and credits."""
+    def __init__(self, parent):
+        self.dialog = tk.Toplevel(parent)
+        self.dialog.title(f"About {APP_NAME}")
+        self.dialog.geometry("650x700")
+        self.dialog.resizable(False, False)
+        self.dialog.transient(parent)
+        self.dialog.grab_set()
+        
+        # Center window
+        self.dialog.update_idletasks()
+        x = (self.dialog.winfo_screenwidth() // 2) - (650 // 2)
+        y = (self.dialog.winfo_screenheight() // 2) - (700 // 2)
+        self.dialog.geometry(f"650x700+{x}+{y}")
+        
+        # Main frame with white background
+        main_frame = tk.Frame(self.dialog, bg="white")
+        main_frame.pack(fill="both", expand=True)
+        
+        # Header with logo/icon (fixed at top)
+        header_frame = tk.Frame(main_frame, bg="white")
+        header_frame.pack(fill="x", pady=(20, 10))
+        
+        # App icon/logo - robot-granny emoji combination
+        icon_label = tk.Label(header_frame, text="👵🤖", font=("Segoe UI", 48), bg="white")
+        icon_label.pack()
+        
+        # App name and tagline
+        name_label = tk.Label(header_frame, text=APP_NAME, 
+                             font=("Segoe UI", 28, "bold"), 
+                             bg="white", fg="#28A745")
+        name_label.pack(pady=(5, 0))
+        
+        tagline_label = tk.Label(header_frame, text=APP_TAGLINE, 
+                                font=("Segoe UI", 12, "italic"), 
+                                bg="white", fg="#666666")
+        tagline_label.pack(pady=(2, 0))
+        
+        # Version info
+        version_label = tk.Label(header_frame, 
+                                text=f"Version {APP_VERSION} • Released {APP_RELEASE_DATE}", 
+                                font=("Segoe UI", 10), 
+                                bg="white", fg="#888888")
+        version_label.pack(pady=(5, 0))
+        
+        # Separator
+        separator = tk.Frame(main_frame, height=2, bg="#E0E0E0")
+        separator.pack(fill="x", padx=40, pady=15)
+        
+        # Scrollable content frame
+        scroll_container = tk.Frame(main_frame, bg="white")
+        scroll_container.pack(fill="both", expand=True, padx=40)
+        
+        # Canvas for scrolling
+        canvas = tk.Canvas(scroll_container, bg="white", highlightthickness=0)
+        scrollbar = tk.Scrollbar(scroll_container, orient="vertical", command=canvas.yview)
+        scrollable_frame = tk.Frame(canvas, bg="white")
+        
+        scrollable_frame.bind(
+            "<Configure>",
+            lambda e: canvas.configure(scrollregion=canvas.bbox("all"))
+        )
+        
+        canvas.create_window((0, 0), window=scrollable_frame, anchor="nw")
+        canvas.configure(yscrollcommand=scrollbar.set)
+        
+        canvas.pack(side="left", fill="both", expand=True)
+        scrollbar.pack(side="right", fill="y")
+        
+        # Enable mouse wheel scrolling
+        def _on_mousewheel(event):
+            canvas.yview_scroll(int(-1*(event.delta/120)), "units")
+        canvas.bind_all("<MouseWheel>", _on_mousewheel)
+        
+        # Description
+        desc_frame = tk.Frame(scrollable_frame, bg="white")
+        desc_frame.pack(fill="x", pady=(0, 10))
+        
+        desc_text = ("VERA (Vusion Electronic Retail Assistant) is a professional tool designed\n"
+                    "to streamline and automate the management of SES-imagotag Vusion Access Points.\n\n"
+                    "With VERA, IT professionals can efficiently handle multiple AP configurations,\n"
+                    "perform batch operations, and maintain comprehensive credential management—\n"
+                    "all through an intuitive, user-friendly interface.")
+        
+        desc_label = tk.Label(desc_frame, text=desc_text, 
+                             font=("Segoe UI", 10), 
+                             bg="white", fg="#333333",
+                             justify="left", wraplength=550)
+        desc_label.pack(anchor="w")
+        
+        # Features section
+        features_frame = tk.Frame(scrollable_frame, bg="#F8F9FA", relief="solid", bd=1)
+        features_frame.pack(fill="x", pady=15)
+        
+        features_title = tk.Label(features_frame, text="Key Features", 
+                                 font=("Segoe UI", 12, "bold"), 
+                                 bg="#F8F9FA", fg="#333333")
+        features_title.pack(pady=(10, 5))
+        
+        features_text = ("• Automated provisioning status checks\n"
+                        "• One-click SSH enablement\n"
+                        "• Secure credential management with AES-256 encryption\n"
+                        "• Batch operations across multiple Access Points\n"
+                        "• Step-by-step execution control\n"
+                        "• Connection status monitoring\n"
+                        "• Multi-user support with role-based access\n"
+                        "• Quick Connect for individual AP management\n"
+                        "• Cato Networks warning detection and handling")
+        
+        features_label = tk.Label(features_frame, text=features_text, 
+                                 font=("Segoe UI", 9), 
+                                 bg="#F8F9FA", fg="#555555",
+                                 justify="left")
+        features_label.pack(padx=20, pady=(0, 10), anchor="w")
+        
+        # Credits section
+        credits_frame = tk.Frame(scrollable_frame, bg="white")
+        credits_frame.pack(fill="x", pady=10)
+        
+        credits_title = tk.Label(credits_frame, text="Credits", 
+                                font=("Segoe UI", 12, "bold"), 
+                                bg="white", fg="#333333")
+        credits_title.pack(pady=(5, 10))
+        
+        credits_text = ("Created by: Peter Andersson\n"
+                       "with assistance from my friendly GitHub Copilot friend\n\n"
+                       "Built for Elkjøp Nordic AS")
+        
+        credits_label = tk.Label(credits_frame, text=credits_text, 
+                                font=("Segoe UI", 10), 
+                                bg="white", fg="#666666",
+                                justify="center")
+        credits_label.pack()
+        
+        # Add some bottom padding in scrollable content
+        bottom_padding = tk.Frame(scrollable_frame, bg="white", height=20)
+        bottom_padding.pack()
+        
+        # Close button (fixed at bottom)
+        button_frame = tk.Frame(main_frame, bg="white")
+        button_frame.pack(fill="x", pady=(10, 20))
+        
+        close_btn = tk.Button(button_frame, text="Close", 
+                             command=self._cleanup_and_close,
+                             font=("Segoe UI", 10, "bold"),
+                             bg="#28A745", fg="white",
+                             activebackground="#218838",
+                             relief="flat", bd=0,
+                             padx=40, pady=10,
+                             cursor="hand2")
+        close_btn.pack()
+    
+    def _cleanup_and_close(self):
+        """Clean up event bindings and close dialog."""
+        # Unbind mouse wheel to prevent memory leaks
+        self.dialog.unbind_all("<MouseWheel>")
+        self.dialog.destroy()
+
 class App:
     def __init__(self, root, current_user):
         self.root = root
         self.current_user = current_user
         self.settings = load_settings()
-        self.worker = WebAutomationWorker(self._update_progress, self._log_activity, root)
+        self.worker = WebAutomationWorker(
+            self._update_progress, 
+            self._log_activity, 
+            root,
+            provisioning_callback=self._on_check_provisioning,
+            ssh_callback=self._on_enable_ssh,
+            close_browser_callback=self._on_close_browser,
+            ping_selected_callback=self._on_ping_selected
+        )
         
         # Configure window
-        w, h = self.settings.get("window_size", [800, 700])
-        root.geometry(f"{w}x{h}")
         root.title(f"{APP_NAME} v{APP_VERSION} - {current_user['full_name']} ({current_user['role']})")
+        
+        # Enable window resizing (remove any size restrictions)
+        root.resizable(True, True)
+        
+        # Set minimum window size
+        root.minsize(800, 600)
+        
+        # Start maximized
+        root.state('zoomed')  # Windows maximized state
         
         self._build_ui()
         root.protocol("WM_DELETE_WINDOW", self._on_close)
@@ -2173,23 +2399,51 @@ class App:
         # Create a style for bordered entries
         style.configure("Bordered.TEntry", relief="solid", borderwidth=1, padding=5)
         
+        # AP ID with search button (Row 0)
+        ttk.Label(conn_frame, text="AP ID:", style="Modern.TLabel").grid(row=0, column=0, sticky="w", padx=(0, 10))
+        self.ap_id_var = tk.StringVar(value="")
+        ap_id_entry = ttk.Entry(conn_frame, textvariable=self.ap_id_var, width=20, style="Bordered.TEntry", font=("Segoe UI", 10))
+        ap_id_entry.grid(row=0, column=1, sticky="w", padx=5)
+        
+        # Search button with magnifying glass icon
+        self.search_ap_btn = tk.Button(conn_frame, text="🔍", 
+                                       command=self._on_search_ap,
+                                       font=("Segoe UI", 12),
+                                       bg="#17A2B8", fg="white",
+                                       activebackground="#117A8B",
+                                       relief="flat", bd=0,
+                                       padx=8, pady=4,
+                                       cursor="hand2")
+        self.search_ap_btn.grid(row=0, column=2, sticky="w", padx=(5, 20))
+        
         # IP Address
-        ttk.Label(conn_frame, text="IP Address:", style="Modern.TLabel").grid(row=0, column=0, sticky="w", padx=(0, 10))
+        ttk.Label(conn_frame, text="IP Address:", style="Modern.TLabel").grid(row=0, column=3, sticky="w", padx=(0, 10))
         self.ip_var = tk.StringVar(value="")
         ip_entry = ttk.Entry(conn_frame, textvariable=self.ip_var, width=20, style="Bordered.TEntry", font=("Segoe UI", 10))
-        ip_entry.grid(row=0, column=1, sticky="w", padx=5)
+        ip_entry.grid(row=0, column=4, sticky="w", padx=5)
         
-        # Username
-        ttk.Label(conn_frame, text="Username:", style="Modern.TLabel").grid(row=0, column=2, sticky="w", padx=(20, 10))
+        # Ping button
+        self.ping_btn = tk.Button(conn_frame, text="Ping", 
+                                  command=self._on_ping_single,
+                                  font=("Segoe UI", 10),
+                                  bg="#6C757D", fg="white",
+                                  activebackground="#5A6268",
+                                  relief="flat", bd=0,
+                                  padx=15, pady=8,
+                                  cursor="hand2")
+        self.ping_btn.grid(row=0, column=5, sticky="w", padx=(20, 0))
+        
+        # Username (Row 1)
+        ttk.Label(conn_frame, text="Username:", style="Modern.TLabel").grid(row=1, column=0, sticky="w", padx=(0, 10), pady=(10, 0))
         self.username_var = tk.StringVar(value="")
         username_entry = ttk.Entry(conn_frame, textvariable=self.username_var, width=20, style="Bordered.TEntry", font=("Segoe UI", 10))
-        username_entry.grid(row=0, column=3, sticky="w", padx=5)
+        username_entry.grid(row=1, column=1, sticky="w", padx=5, pady=(10, 0))
         
         # Password
-        ttk.Label(conn_frame, text="Password:", style="Modern.TLabel").grid(row=1, column=0, sticky="w", padx=(0, 10), pady=(10, 0))
+        ttk.Label(conn_frame, text="Password:", style="Modern.TLabel").grid(row=1, column=3, sticky="w", padx=(0, 10), pady=(10, 0))
         self.password_var = tk.StringVar(value="")
         self.password_entry = ttk.Entry(conn_frame, textvariable=self.password_var, width=20, show="*", style="Bordered.TEntry", font=("Segoe UI", 10))
-        self.password_entry.grid(row=1, column=1, sticky="w", padx=5, pady=(10, 0))
+        self.password_entry.grid(row=1, column=4, sticky="w", padx=5, pady=(10, 0))
         
         # Show password checkbox (larger)
         self.show_password_var = tk.BooleanVar(value=False)
@@ -2198,7 +2452,7 @@ class App:
         show_pwd_check = ttk.Checkbutton(conn_frame, text="Show password", variable=self.show_password_var,
                                          style="Larger.TCheckbutton",
                                          command=lambda: self.password_entry.config(show="" if self.show_password_var.get() else "*"))
-        show_pwd_check.grid(row=1, column=2, sticky="w", padx=(20, 0), pady=(10, 0))
+        show_pwd_check.grid(row=1, column=2, columnspan=2, sticky="w", padx=(5, 0), pady=(10, 0))
         
         # Connect button
         self.quick_connect_btn = tk.Button(conn_frame, text="Connect", 
@@ -2209,7 +2463,7 @@ class App:
                                            relief="flat", bd=0,
                                            padx=20, pady=8,
                                            cursor="hand2")
-        self.quick_connect_btn.grid(row=1, column=3, sticky="w", padx=(20, 0), pady=(10, 0))
+        self.quick_connect_btn.grid(row=1, column=5, sticky="w", padx=(20, 0), pady=(10, 0))
         
         # Operations Frame - reorganized with grouped buttons
         ops_frame = ttk.Frame(main_frame, style="Modern.TFrame")
@@ -2229,42 +2483,25 @@ class App:
                                                  cursor="hand2")
         self.start_browser_login_btn.pack(side="left", padx=(0, 5))
         
-        # Disabled buttons with dark text for better readability
-        self.check_provisioning_btn = tk.Button(browser_group, text="Provisioning", 
-                                                command=self._on_check_provisioning,
-                                                font=("Segoe UI", 10),
-                                                bg="#E0E0E0", fg="#333333",
-                                                activebackground="#D0D0D0",
-                                                disabledforeground="#333333",
-                                                relief="flat", bd=0,
-                                                padx=15, pady=8,
-                                                cursor="hand2",
-                                                state="disabled")
-        self.check_provisioning_btn.pack(side="left", padx=(0, 5))
+        self.ping_all_btn = tk.Button(browser_group, text="Ping All APs", 
+                                      command=self._on_ping_all,
+                                      font=("Segoe UI", 10),
+                                      bg="#6C757D", fg="white",
+                                      activebackground="#5A6268",
+                                      relief="flat", bd=0,
+                                      padx=15, pady=8,
+                                      cursor="hand2")
+        self.ping_all_btn.pack(side="left")
         
-        self.enable_ssh_btn = tk.Button(browser_group, text="SSH", 
-                                        command=self._on_enable_ssh,
-                                        font=("Segoe UI", 10),
-                                        bg="#E0E0E0", fg="#333333",
-                                        activebackground="#D0D0D0",
-                                        disabledforeground="#333333",
-                                        relief="flat", bd=0,
-                                        padx=15, pady=8,
-                                        cursor="hand2",
-                                        state="disabled")
-        self.enable_ssh_btn.pack(side="left", padx=(0, 5))
-        
-        self.close_browser_btn = tk.Button(browser_group, text="Close Browser", 
-                                           command=self._on_close_browser,
-                                           font=("Segoe UI", 10),
-                                           bg="#E0E0E0", fg="#333333",
-                                           activebackground="#D0D0D0",
-                                           disabledforeground="#333333",
-                                           relief="flat", bd=0,
-                                           padx=15, pady=8,
-                                           cursor="hand2",
-                                           state="disabled")
-        self.close_browser_btn.pack(side="left")
+        self.stop_ping_btn = tk.Button(browser_group, text="Stop Ping", 
+                                       command=self._on_stop_ping,
+                                       font=("Segoe UI", 10),
+                                       bg="#DC3545", fg="white",
+                                       activebackground="#C82333",
+                                       relief="flat", bd=0,
+                                       padx=15, pady=8,
+                                       cursor="hand2")
+        # Hidden by default
         
         # Settings Group
         settings_group = ttk.LabelFrame(ops_frame, text="Settings", padding=10, style="Modern.TLabelframe")
@@ -2288,7 +2525,17 @@ class App:
                                           relief="flat", bd=0,
                                           padx=15, pady=8,
                                           cursor="hand2")
-        self.user_manager_btn.pack(side="left")
+        self.user_manager_btn.pack(side="left", padx=(0, 5))
+        
+        self.about_btn = tk.Button(settings_group, text="About", 
+                                   command=self._show_about,
+                                   font=("Segoe UI", 10),
+                                   bg="#17A2B8", fg="white",
+                                   activebackground="#117A8B",
+                                   relief="flat", bd=0,
+                                   padx=15, pady=8,
+                                   cursor="hand2")
+        self.about_btn.pack(side="left")
         
         # Exit Program button with spacing label for alignment
         exit_group = ttk.LabelFrame(ops_frame, text=" ", padding=10, style="Modern.TLabelframe")
@@ -2371,6 +2618,280 @@ class App:
         thread = threading.Thread(target=task_func, daemon=True)
         thread.start()
     
+    def _on_search_ap(self):
+        """Search for AP in credential manager and auto-fill fields."""
+        ap_id = self.ap_id_var.get().strip()
+        
+        if not ap_id:
+            messagebox.showwarning("Missing AP ID", "Please enter an AP ID to search")
+            return
+        
+        try:
+            from credential_manager_v2 import CredentialManager
+            creds_manager = CredentialManager()
+            
+            # Find credentials for this AP
+            credentials = creds_manager.find_by_ap_id(ap_id)
+            
+            if credentials:
+                # Auto-fill the fields - map credential manager fields to our fields
+                ip = credentials.get('ip_address', '')
+                username = credentials.get('username_webui', '')
+                password = credentials.get('password_webui', '')
+                
+                self.ip_var.set(ip)
+                self.username_var.set(username)
+                self.password_var.set(password)
+                
+                # Log success with details
+                store_info = f"Store {credentials.get('store_id', 'N/A')}"
+                if credentials.get('store_alias'):
+                    store_info += f" ({credentials.get('store_alias')})"
+                self._log_activity(f"✓ Loaded credentials for AP: {ap_id} - {store_info} - IP: {ip}")
+            else:
+                self._log_activity(f"✗ No credentials found for AP: {ap_id}")
+                messagebox.showwarning("AP Not Found", 
+                                      f"No credentials found for AP ID: {ap_id}\n\n"
+                                      f"Please check:\n"
+                                      f"• AP ID is correct\n"
+                                      f"• AP has been added to Credential Manager")
+                
+        except ImportError:
+            messagebox.showerror("Error", "Credential Manager not found")
+        except Exception as e:
+            self._log_activity(f"Error searching for AP {ap_id}: {str(e)}")
+            messagebox.showerror("Search Error", f"Error: {str(e)}")
+    
+    def _on_ping_single(self):
+        """Ping the IP address in Quick Connect field."""
+        ip = self.ip_var.get().strip()
+        
+        if not ip:
+            messagebox.showwarning("Missing IP Address", "Please enter an IP Address to ping")
+            return
+        
+        def task():
+            try:
+                self._log_activity(f"Pinging {ip}...")
+                self._update_progress(f"Pinging {ip}...", 50)
+                
+                success, response_time = ping_host(ip, timeout=2)
+                
+                if success:
+                    self._log_activity(f"✓ {ip} is reachable (Response: {response_time}ms)")
+                    self._update_progress(f"Ping successful: {response_time}ms", 100)
+                    messagebox.showinfo("Ping Successful", 
+                                       f"{ip} is reachable\nResponse time: {response_time}ms")
+                else:
+                    self._log_activity(f"✗ {ip} is unreachable")
+                    self._update_progress("Ping failed", 100)
+                    messagebox.showwarning("Ping Failed", 
+                                          f"{ip} is unreachable\n\nPlease check:\n• IP address is correct\n• Device is powered on\n• Network connection is working")
+                
+            except Exception as e:
+                self._log_activity(f"Error pinging {ip}: {str(e)}")
+                messagebox.showerror("Ping Error", f"Error: {str(e)}")
+            finally:
+                self._update_progress("Ready", 0)
+        
+        self._run_task_async(task)
+    
+    def _on_ping_all(self):
+        """Ping all APs in the credential manager."""
+        try:
+            from credential_manager_v2 import CredentialManager
+            creds_manager = CredentialManager()
+            all_credentials = creds_manager.get_all()
+            
+            if not all_credentials:
+                messagebox.showinfo("No APs Found", "No Access Points configured in credential manager.\n\nPlease add AP credentials first.")
+                return
+            
+            # Show confirmation dialog
+            total = len(all_credentials)
+            response = messagebox.askyesno(
+                "Confirm Ping All APs",
+                f"This will ping ALL {total} Access Points in the database.\n\n"
+                f"This operation may take several minutes.\n\n"
+                f"Do you want to continue?",
+                icon='warning'
+            )
+            
+            if not response:
+                self._log_activity("Ping All APs operation cancelled by user")
+                return
+            
+            # Create stop flag and show stop button
+            self.stop_ping_flag = False
+            self.ping_all_btn.pack_forget()
+            self.stop_ping_btn.pack(side="left", padx=(0, 5))
+            
+            def task():
+                try:
+                    total = len(all_credentials)
+                    online = 0
+                    offline = 0
+                    stopped = False
+                    
+                    self._log_activity(f"Starting ping test for {total} Access Points...")
+                    self.results_text.delete("1.0", "end")
+                    self.results_text.insert("end", f"Ping Results for {total} Access Points:\n")
+                    self.results_text.insert("end", "=" * 60 + "\n\n")
+                    
+                    for idx, cred in enumerate(all_credentials, 1):
+                        # Check stop flag
+                        if self.stop_ping_flag:
+                            stopped = True
+                            self._log_activity(f"Ping test stopped by user at {idx}/{total}")
+                            break
+                        
+                        ap_id = cred.get('ap_id', 'N/A')
+                        ip = cred.get('ip_address', 'N/A')
+                        
+                        self._update_progress(f"Pinging AP {idx}/{total}: {ip}", (idx / total) * 100)
+                        self._log_activity(f"Pinging {ap_id} ({ip})...")
+                        
+                        success, response_time = ping_host(ip, timeout=2)
+                        
+                        if success:
+                            online += 1
+                            status = f"✓ ONLINE  ({response_time}ms)"
+                            self.results_text.insert("end", f"{status:25} {ap_id:20} {ip}\n", "online")
+                            self._log_activity(f"  ✓ {ap_id} is online ({response_time}ms)")
+                        else:
+                            offline += 1
+                            status = "✗ OFFLINE"
+                            self.results_text.insert("end", f"{status:25} {ap_id:20} {ip}\n", "offline")
+                            self._log_activity(f"  ✗ {ap_id} is offline")
+                    
+                    # Configure text tags for colored output
+                    self.results_text.tag_config("online", foreground="#28A745")
+                    self.results_text.tag_config("offline", foreground="#DC3545")
+                    
+                    # Summary
+                    self.results_text.insert("end", "\n" + "=" * 60 + "\n")
+                    if stopped:
+                        self.results_text.insert("end", f"STOPPED: Tested {idx} of {total} APs\n")
+                        self.results_text.insert("end", f"Summary: {online} online, {offline} offline ({idx} tested)\n")
+                        self._log_activity(f"Ping test stopped: {online} online, {offline} offline ({idx}/{total} tested)")
+                        self._update_progress(f"Stopped: {online} online, {offline} offline ({idx}/{total} tested)", 0)
+                        messagebox.showwarning("Ping Stopped", 
+                                             f"Ping test was stopped by user.\n\n"
+                                             f"Tested:  {idx} of {total}\n"
+                                             f"Online:  {online}\n"
+                                             f"Offline: {offline}")
+                    else:
+                        self.results_text.insert("end", f"Summary: {online} online, {offline} offline ({total} total)\n")
+                        self._log_activity(f"Ping test complete: {online} online, {offline} offline")
+                        self._update_progress(f"Complete: {online} online, {offline} offline", 100)
+                        messagebox.showinfo("Ping Complete", 
+                                           f"Ping test completed!\n\n"
+                                           f"Online:  {online}\n"
+                                           f"Offline: {offline}\n"
+                                           f"Total:   {total}")
+                    
+                except Exception as e:
+                    self._log_activity(f"Error during ping test: {str(e)}")
+                    messagebox.showerror("Ping Error", f"Error: {str(e)}")
+                finally:
+                    self._update_progress("Ready", 0)
+                    self.stop_ping_flag = False
+                    # Restore buttons
+                    self.stop_ping_btn.pack_forget()
+                    self.ping_all_btn.pack(side="left")
+            
+            self._run_task_async(task)
+            
+        except ImportError:
+            messagebox.showerror("Error", "Credential Manager not found")
+        except Exception as e:
+            messagebox.showerror("Error", f"Error loading credentials: {str(e)}")
+    
+    def _on_stop_ping(self):
+        """Stop the ongoing ping operation."""
+        if hasattr(self, 'stop_ping_flag'):
+            self.stop_ping_flag = True
+            self._log_activity("Stop ping requested...")
+            messagebox.showinfo("Stopping", "Stopping ping operation...\nPlease wait for current ping to complete.")
+    
+    def _on_ping_selected(self, selected_aps):
+        """Ping selected APs from the connection status dialog.
+        
+        Args:
+            selected_aps: List of AP dictionaries to ping
+        """
+        if not selected_aps:
+            messagebox.showinfo("No APs", "No Access Points selected.")
+            return
+        
+        total = len(selected_aps)
+        response = messagebox.askyesno(
+            "Confirm Ping Selected APs",
+            f"This will ping {total} selected Access Point{'s' if total > 1 else ''}.\n\n"
+            f"Do you want to continue?",
+            icon='question'
+        )
+        
+        if not response:
+            self._log_activity("Ping selected APs operation cancelled by user")
+            return
+        
+        def task():
+            try:
+                online = 0
+                offline = 0
+                
+                self._log_activity(f"Starting ping test for {total} selected Access Point{'s' if total > 1 else ''}...")
+                self.results_text.delete("1.0", "end")
+                self.results_text.insert("end", f"Ping Results for {total} Selected AP{'s' if total > 1 else ''}:\n")
+                self.results_text.insert("end", "=" * 60 + "\n\n")
+                
+                for idx, ap in enumerate(selected_aps, 1):
+                    ap_id = ap.get('ap_id', 'N/A')
+                    ip = ap.get('ip_address', 'N/A')
+                    
+                    self._update_progress(f"Pinging AP {idx}/{total}: {ip}", (idx / total) * 100)
+                    self._log_activity(f"Pinging {ap_id} ({ip})...")
+                    
+                    success, response_time = ping_host(ip, timeout=2)
+                    
+                    if success:
+                        online += 1
+                        status = f"✓ ONLINE  ({response_time}ms)"
+                        self.results_text.insert("end", f"{status:25} {ap_id:20} {ip}\n", "online")
+                        self._log_activity(f"  ✓ {ap_id} is online ({response_time}ms)")
+                    else:
+                        offline += 1
+                        status = "✗ OFFLINE"
+                        self.results_text.insert("end", f"{status:25} {ap_id:20} {ip}\n", "offline")
+                        self._log_activity(f"  ✗ {ap_id} is offline")
+                
+                # Configure text tags for colored output
+                self.results_text.tag_config("online", foreground="#28A745")
+                self.results_text.tag_config("offline", foreground="#DC3545")
+                
+                # Summary
+                self.results_text.insert("end", "\n" + "=" * 60 + "\n")
+                self.results_text.insert("end", f"Summary: {online} online, {offline} offline ({total} total)\n")
+                
+                self._log_activity(f"Ping test complete: {online} online, {offline} offline")
+                self._update_progress(f"Complete: {online} online, {offline} offline", 100)
+                
+                messagebox.showinfo("Ping Complete", 
+                                   f"Ping test completed!\n\n"
+                                   f"Online:  {online}\n"
+                                   f"Offline: {offline}\n"
+                                   f"Total:   {total}")
+                
+            except Exception as e:
+                self._log_activity(f"Error during ping test: {str(e)}")
+                messagebox.showerror("Ping Error", f"Error: {str(e)}")
+            finally:
+                self._update_progress("Ready", 0)
+        
+        self._run_task_async(task)
+    
+    
     def _on_quick_connect(self):
         """Handle Quick Connect - connect to single AP and fetch status info."""
         ip = self.ip_var.get().strip()
@@ -2386,7 +2907,7 @@ class App:
                 self._update_progress("Connecting to AP...", 0)
                 
                 # Load credential manager (will check for existing AP after extracting AP ID)
-                from credential_manager import CredentialManager
+                from credential_manager_v2 import CredentialManager
                 creds_manager = CredentialManager()
                 
                 # Initialize browser if not already open
@@ -2545,10 +3066,9 @@ class App:
                         "message": f"Successfully connected to AP {ap_id}"
                     })
                     
-                    # Enable browser operation buttons
-                    self.root.after(0, lambda: self.check_provisioning_btn.config(state="normal", bg="#FFC107"))
-                    self.root.after(0, lambda: self.enable_ssh_btn.config(state="normal", bg="#17A2B8"))
-                    self.root.after(0, lambda: self.close_browser_btn.config(state="normal"))
+                    # Enable browser operation buttons in status dialog
+                    if self.worker.status_dialog:
+                        self.root.after(0, lambda: self.worker.status_dialog.enable_action_buttons())
                     
                 except Exception as e:
                     self.worker.log(f"Error fetching status: {str(e)}")
@@ -2578,6 +3098,10 @@ class App:
             return match.group(1).strip()
         return None
     
+    def _show_about(self):
+        """Show About dialog."""
+        AboutDialog(self.root)
+    
     def _on_exit_program(self):
         """Handle Exit Program button."""
         if messagebox.askyesno("Exit", "Are you sure you want to exit?"):
@@ -2602,10 +3126,9 @@ class App:
             self._display_result(result)
             # Enable buttons if we have at least one successful connection (success or warning)
             if result["status"] in ["success", "warning"]:
-                # Enable browser operation buttons after successful login
-                self.root.after(0, lambda: self.check_provisioning_btn.config(state="normal", bg="#FFC107"))
-                self.root.after(0, lambda: self.enable_ssh_btn.config(state="normal", bg="#17A2B8"))
-                self.root.after(0, lambda: self.close_browser_btn.config(state="normal"))
+                # Enable browser operation buttons in status dialog after successful login
+                if self.worker.status_dialog:
+                    self.root.after(0, lambda: self.worker.status_dialog.enable_action_buttons())
         
         self._run_task_async(task)
     
@@ -2789,7 +3312,7 @@ class App:
     
     def _on_user_manager(self):
         """Open the user manager."""
-        from user_manager_gui import UserManagerGUI
+        from user_manager_gui_v2 import UserManagerGUI
         
         try:
             UserManagerGUI(self.current_user, self.root)
@@ -2804,12 +3327,13 @@ class App:
             self._display_result(result)
             self._update_progress("Ready", 0)
             self.root.after(0, lambda: self.login_btn.config(state="disabled"))
-            self.root.after(0, lambda: self.check_provisioning_btn.config(state="disabled"))
             self.root.after(0, lambda: self.start_recording_btn.config(state="disabled"))
             self.root.after(0, lambda: self.stop_recording_btn.config(state="disabled"))
             self.root.after(0, lambda: self.diagnostic_btn.config(state="disabled"))
             self.root.after(0, lambda: self.capture_btn.config(state="disabled"))
-            self.root.after(0, lambda: self.close_browser_btn.config(state="disabled"))
+            # Disable action buttons in status dialog
+            if self.worker.status_dialog:
+                self.root.after(0, lambda: self.worker.status_dialog.disable_action_buttons())
         
         self._run_task_async(task)
     

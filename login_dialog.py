@@ -1,10 +1,10 @@
 """
-Login Dialog - Authentication dialog for ESL AP Helper applications
+Login Dialog - Authentication dialog for VERA applications
 """
 
 import tkinter as tk
 from tkinter import ttk, messagebox
-from user_manager import UserManager
+from user_manager_v2 import UserManager
 
 class LoginDialog:
     """Login dialog for user authentication."""
@@ -16,7 +16,7 @@ class LoginDialog:
         # Always create as standalone Tk window for better visibility
         self.dialog = tk.Tk()
         
-        self.dialog.title("ESL AP Helper - Login")
+        self.dialog.title("VERA - Login")
         self.dialog.geometry("400x450")
         self.dialog.resizable(False, False)
         
@@ -67,12 +67,16 @@ class LoginDialog:
         main_frame = ttk.Frame(self.dialog, padding=30, style="Login.TFrame")
         main_frame.pack(fill="both", expand=True)
         
-        # Title
-        title_label = ttk.Label(main_frame, text="ESL AP Helper", style="Login.Title.TLabel")
+        # Title with robot-granny emoji
+        title_label = ttk.Label(main_frame, text="👵🤖 VERA", style="Login.Title.TLabel")
         title_label.pack(pady=(0, 5))
         
-        subtitle_label = ttk.Label(main_frame, text="Please sign in to continue", style="Login.TLabel")
-        subtitle_label.pack(pady=(0, 30))
+        subtitle_label = ttk.Label(main_frame, text="Vusion support with a human touch", 
+                                   style="Login.TLabel", font=("Segoe UI", 9, "italic"))
+        subtitle_label.pack(pady=(0, 5))
+        
+        signin_label = ttk.Label(main_frame, text="Please sign in to continue", style="Login.TLabel")
+        signin_label.pack(pady=(0, 30))
         
         # Username
         username_frame = ttk.Frame(main_frame, style="Login.TFrame")
@@ -81,7 +85,7 @@ class LoginDialog:
         ttk.Label(username_frame, text="Username:", style="Login.TLabel").pack(anchor="w", pady=(0, 5))
         self.username_entry = ttk.Entry(username_frame, font=("Segoe UI", 10), style="Login.TEntry")
         self.username_entry.pack(fill="x")
-        self.username_entry.insert(0, "MasterBlaster")  # Pre-fill for testing
+        self.username_entry.insert(0, "peterander")  # Pre-fill for testing
         
         # Password
         password_frame = ttk.Frame(main_frame, style="Login.TFrame")
@@ -90,7 +94,7 @@ class LoginDialog:
         ttk.Label(password_frame, text="Password:", style="Login.TLabel").pack(anchor="w", pady=(0, 5))
         self.password_entry = ttk.Entry(password_frame, show="*", font=("Segoe UI", 10), style="Login.TEntry")
         self.password_entry.pack(fill="x")
-        self.password_entry.insert(0, "VinterMorker2025&")  # Pre-fill for testing
+        self.password_entry.insert(0, "Test1234567890")  # Pre-fill for testing
         
         # Show password checkbox
         self.show_password_var = tk.BooleanVar(value=False)
