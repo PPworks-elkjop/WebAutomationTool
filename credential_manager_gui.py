@@ -58,10 +58,14 @@ class CredentialManagerGUI:
         ttk.Button(toolbar, text="➕ Add New", command=self._add_credential, style="Modern.TButton").pack(side="left", padx=(0, 5))
         ttk.Button(toolbar, text="✏️ Edit", command=self._edit_credential, style="Modern.TButton").pack(side="left", padx=(0, 5))
         ttk.Button(toolbar, text="🗑️ Delete", command=self._delete_credential, style="Modern.TButton").pack(side="left", padx=(0, 5))
-        ttk.Button(toolbar, text="📤 Import Excel", command=self._import_excel, style="Modern.TButton").pack(side="left", padx=(0, 5))
-        ttk.Button(toolbar, text="📥 Export Excel", command=self._export_excel, style="Modern.TButton").pack(side="left", padx=(0, 5))
+        
+        # Import/Export buttons - only for admins
+        if self.current_user and self.current_user.get('role') == 'Admin':
+            ttk.Button(toolbar, text="📤 Import Excel", command=self._import_excel, style="Modern.TButton").pack(side="left", padx=(0, 5))
+            ttk.Button(toolbar, text="📥 Export Excel", command=self._export_excel, style="Modern.TButton").pack(side="left", padx=(0, 5))
+        
         ttk.Button(toolbar, text="🔄 Refresh", command=self._refresh_list, style="Modern.TButton").pack(side="left", padx=(0, 5))
-        ttk.Button(toolbar, text="❌ Close", command=self.root.quit, style="Modern.TButton").pack(side="right")
+        ttk.Button(toolbar, text="❌ Close", command=self.root.destroy, style="Modern.TButton").pack(side="right")
         
         # Search frame
         search_frame = ttk.LabelFrame(main_frame, text="Search", padding=10, style="Modern.TLabelframe")

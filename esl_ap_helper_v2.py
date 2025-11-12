@@ -32,8 +32,8 @@ except ImportError:
 from connection_status_dialog import ConnectionStatusDialog
 
 APP_NAME = "ESL AP Helper"
-APP_VERSION = "0.2"
-APP_RELEASE_DATE = "2025-11-10"
+APP_VERSION = "0.3"
+APP_RELEASE_DATE = "2025-11-12"
 SETTINGS_FILE = Path.home() / f".{APP_NAME.replace(' ', '_').lower()}_settings.json"
 
 def load_settings():
@@ -65,6 +65,51 @@ class WebAutomationWorker:
         self.recording = False
         self.recorded_events = []
         self.status_dialog = None
+    
+    def handle_cato_warning(self):
+        """Check for and handle Cato Networks warning page.
+        Returns True if warning was detected and handled, False otherwise.
+        """
+        try:
+            if not self.driver:
+                return False
+                
+            page_source = self.driver.page_source
+            
+            # Check if Cato Networks warning page is present
+            if ('Warning - Restricted Website' in page_source or 
+                'Invalid SSL/TLS certificate - IP address mismatch' in page_source):
+                
+                self.log("Cato Networks warning detected, clicking PROCEED button...")
+                
+                # Find and click the PROCEED button
+                from selenium.webdriver.common.by import By
+                from selenium.webdriver.support.ui import WebDriverWait
+                from selenium.webdriver.support import expected_conditions as EC
+                
+                try:
+                    # Wait for and click the proceed button
+                    proceed_btn = WebDriverWait(self.driver, 5).until(
+                        EC.element_to_be_clickable((By.CSS_SELECTOR, "button.proceed.prompt"))
+                    )
+                    proceed_btn.click()
+                    self.log("✓ Clicked PROCEED button")
+                    
+                    # Wait 2 seconds then refresh
+                    time.sleep(2)
+                    self.driver.refresh()
+                    self.log("✓ Page refreshed after Cato warning")
+                    time.sleep(2)  # Wait for page to reload
+                    
+                    return True
+                except Exception as e:
+                    self.log(f"Could not click PROCEED button: {str(e)}")
+                    return False
+            
+            return False
+        except Exception as e:
+            self.log(f"Error checking for Cato warning: {str(e)}")
+            return False
         
     def open_browser_with_auth(self, ip_address, username, password):
         """Open browser and navigate with credentials embedded (bypasses HTTP Basic Auth dialog)."""
@@ -243,135 +288,138 @@ class WebAutomationWorker:
             
             self.log(f"✓ All {total_aps} tabs opened")
             
-            # PHASE 2: Connect to all APs in parallel
-            self.log(f"\n=== Phase 2: Connecting to all APs in parallel ===")
-            self.progress("Connecting to all APs simultaneously...", 20)
+            # PHASE 2: Start navigation on all tabs sequentially (don't wait for each to finish)
+            self.log(f"\n=== Phase 2: Starting navigation on all tabs ===")
+            self.progress("Starting navigation on all tabs...", 20)
             
-            import threading
-            import queue
-            
-            results_queue = queue.Queue()
-            threads = []
-            driver_lock = threading.Lock()  # Ensure thread-safe driver access
-            
-            def connect_to_ap(ap, tab_handle, index):
-                """Connect to a single AP in a thread."""
+            for index, (ap, tab_handle) in enumerate(zip(ap_list, tab_handles)):
                 ap_id = ap.get('ap_id', 'Unknown')
+                ip_address = ap.get('ip_address', '')
+                username = ap.get('username_webui', '')
+                password = ap.get('password_webui', '')
+                
+                # Update status: connecting
+                if self.status_dialog:
+                    self.status_dialog.update_status(ap_id, "connecting", "Starting navigation...")
+                
+                # Parse IP address and build URL
+                ip_address = ip_address.strip()
+                if ip_address.startswith('http://'):
+                    protocol = 'http'
+                    ip_address = ip_address[7:]
+                elif ip_address.startswith('https://'):
+                    protocol = 'https'
+                    ip_address = ip_address[8:]
+                else:
+                    protocol = 'https'
+                
+                if '@' in ip_address:
+                    ip_address = ip_address.split('@')[1]
+                
+                url = f"{protocol}://{ip_address}"
+                
                 try:
-                    ip_address = ap.get('ip_address', '')
-                    username = ap.get('username_webui', '')
-                    password = ap.get('password_webui', '')
+                    self.log(f"Starting navigation for AP {index + 1}/{total_aps}: {ap_id}")
                     
-                    # Update status: connecting
-                    if self.status_dialog:
-                        self.status_dialog.update_status(ap_id, "connecting", "Authenticating...")
+                    # Switch to this tab
+                    self.driver.switch_to.window(tab_handle)
                     
-                    # Parse IP address and build URL
-                    ip_address = ip_address.strip()
-                    if ip_address.startswith('http://'):
-                        protocol = 'http'
-                        ip_address = ip_address[7:]
-                    elif ip_address.startswith('https://'):
-                        protocol = 'https'
-                        ip_address = ip_address[8:]
-                    else:
-                        protocol = 'https'
+                    # Set authentication via CDP
+                    self.driver.execute_cdp_cmd('Network.enable', {})
+                    auth_header = 'Basic ' + __import__('base64').b64encode(f'{username}:{password}'.encode()).decode()
+                    self.driver.execute_cdp_cmd('Network.setExtraHTTPHeaders', {'headers': {'Authorization': auth_header}})
                     
-                    if '@' in ip_address:
-                        ip_address = ip_address.split('@')[1]
+                    # Navigate to URL (start loading but don't wait)
+                    self.driver.get(url)
                     
-                    url = f"{protocol}://{ip_address}"
-                    
-                    # Thread-safe driver operations
-                    with driver_lock:
-                        self.log(f"Connecting to AP {index + 1}/{total_aps}: {ap_id}")
-                        
-                        # Switch to this tab
-                        self.driver.switch_to.window(tab_handle)
-                        
-                        # Set authentication via CDP
-                        self.driver.execute_cdp_cmd('Network.enable', {})
-                        auth_header = 'Basic ' + __import__('base64').b64encode(f'{username}:{password}'.encode()).decode()
-                        self.driver.execute_cdp_cmd('Network.setExtraHTTPHeaders', {'headers': {'Authorization': auth_header}})
-                        
-                        # Navigate to URL (this triggers the page load)
-                        self.driver.get(url)
-                    
-                    # Wait outside the lock so other threads can start their navigation
-                    time.sleep(2)
-                    
-                    self.log(f"✓ Connected to {ap_id}")
-                    
-                    # Update status: connected
-                    if self.status_dialog:
-                        self.status_dialog.update_status(ap_id, "connected", f"Successfully connected to {url}")
-                    
-                    results_queue.put({
-                        'success': True,
+                    # Store tab info immediately
+                    self.ap_tabs.append({
+                        'handle': tab_handle,
+                        'ap_info': ap,
                         'ap_id': ap_id,
-                        'tab_info': {
-                            'handle': tab_handle,
-                            'ap_info': ap,
-                            'ap_id': ap_id,
-                            'ip_address': ip_address,
-                            'status': 'connected'
-                        }
+                        'ip_address': ip_address,
+                        'url': url,
+                        'status': 'loading'
                     })
                     
                 except Exception as e:
-                    error_msg = f"Failed to connect to {ap_id}: {str(e)}"
-                    self.log(f"✗ {error_msg}")
-                    
-                    # Update status: failed
+                    self.log(f"✗ Failed to start navigation for {ap_id}: {str(e)}")
                     if self.status_dialog:
                         self.status_dialog.update_status(ap_id, "failed", str(e))
+            
+            self.log(f"✓ All {total_aps} tabs are now loading")
+            
+            # PHASE 3: Handle Cato warnings on all tabs sequentially
+            self.log(f"\n=== Phase 3: Handling Cato warnings on all tabs ===")
+            self.progress("Checking for Cato warnings...", 50)
+            
+            for index, tab_info in enumerate(self.ap_tabs):
+                ap_id = tab_info['ap_id']
+                tab_handle = tab_info['handle']
+                
+                try:
+                    self.log(f"Checking tab {index + 1}/{total_aps} for Cato warning: {ap_id}")
                     
-                    results_queue.put({
-                        'success': False,
-                        'ap_id': ap_id,
-                        'error': error_msg
-                    })
+                    # Switch to this tab
+                    self.driver.switch_to.window(tab_handle)
+                    
+                    # Wait 2 seconds for page to start loading
+                    time.sleep(2)
+                    
+                    # Check for and handle Cato warning
+                    if self.handle_cato_warning():
+                        self.log(f"Handled Cato warning for {ap_id}")
+                    
+                except Exception as e:
+                    self.log(f"Error checking Cato warning for {ap_id}: {str(e)}")
             
-            # Start connection threads in batches to limit parallel connections
-            self.log(f"Processing {total_aps} APs in batches of {max_parallel}...")
+            self.log(f"✓ Finished checking all tabs for Cato warnings")
             
-            for batch_start in range(0, total_aps, max_parallel):
-                batch_end = min(batch_start + max_parallel, total_aps)
-                batch_size = batch_end - batch_start
-                batch_num = batch_start // max_parallel + 1
-                self.log(f"\n--- Batch {batch_num}: Connecting to APs {batch_start + 1}-{batch_end} ---")
-                
-                # Update status dialog
-                if self.status_dialog:
-                    self.status_dialog.update_summary(f"Batch {batch_num}: Connecting to APs {batch_start + 1}-{batch_end}...")
-                
-                batch_threads = []
-                for index in range(batch_start, batch_end):
-                    ap = ap_list[index]
-                    tab_handle = tab_handles[index]
-                    thread = threading.Thread(target=connect_to_ap, args=(ap, tab_handle, index))
-                    thread.start()
-                    batch_threads.append(thread)
-                    time.sleep(0.1)  # Small delay between thread starts
-                
-                # Wait for current batch to complete before starting next batch
-                for thread in batch_threads:
-                    thread.join()
-                    threads.append(thread)
-                
-                self.log(f"--- Batch {batch_num} complete ---")
+            # PHASE 4: Verify connections
+            self.log(f"\n=== Phase 4: Verifying connections ===")
+            self.progress("Verifying all connections...", 80)
             
-            # Collect results
             success_count = 0
             failed_aps = []
             
-            while not results_queue.empty():
-                result = results_queue.get()
-                if result['success']:
-                    self.ap_tabs.append(result['tab_info'])
-                    success_count += 1
-                else:
-                    failed_aps.append(result['error'])
+            for index, tab_info in enumerate(self.ap_tabs):
+                ap_id = tab_info['ap_id']
+                tab_handle = tab_info['handle']
+                url = tab_info['url']
+                
+                try:
+                    # Switch to tab
+                    self.driver.switch_to.window(tab_handle)
+                    
+                    # Check if we got a valid page (not an error page)
+                    current_url = self.driver.current_url
+                    page_title = self.driver.title
+                    
+                    # Simple check - if we're on the URL we tried to reach, consider it successful
+                    if tab_info['ip_address'] in current_url or page_title:
+                        tab_info['status'] = 'connected'
+                        success_count += 1
+                        self.log(f"✓ {ap_id} connected successfully")
+                        
+                        if self.status_dialog:
+                            self.status_dialog.update_status(ap_id, "connected", f"Connected to {url}")
+                    else:
+                        tab_info['status'] = 'failed'
+                        error_msg = f"Failed to connect to {ap_id}"
+                        failed_aps.append(error_msg)
+                        self.log(f"✗ {error_msg}")
+                        
+                        if self.status_dialog:
+                            self.status_dialog.update_status(ap_id, "failed", "Connection failed")
+                        
+                except Exception as e:
+                    tab_info['status'] = 'failed'
+                    error_msg = f"Failed to verify {ap_id}: {str(e)}"
+                    failed_aps.append(error_msg)
+                    self.log(f"✗ {error_msg}")
+                    
+                    if self.status_dialog:
+                        self.status_dialog.update_status(ap_id, "failed", str(e))
             
             self.is_logged_in = True
             self.progress(f"Connected to {success_count}/{total_aps} APs", 100)
@@ -2382,7 +2430,7 @@ class App:
                     time.sleep(2)
                     
                     # Check for and handle Cato Networks warning
-                    self._handle_cato_warning()
+                    self.worker.handle_cato_warning()
                     
                     self.worker.log(f"✓ Successfully authenticated to {ip}")
                 except Exception as e:
@@ -2517,48 +2565,6 @@ class App:
                 })
         
         self._run_task_async(task)
-    
-    def _handle_cato_warning(self):
-        """Check for and handle Cato Networks warning page.
-        Returns True if warning was detected and handled, False otherwise.
-        """
-        try:
-            page_source = self.worker.driver.page_source
-            
-            # Check if Cato Networks warning page is present
-            if ('Warning - Restricted Website' in page_source or 
-                'Invalid SSL/TLS certificate - IP address mismatch' in page_source):
-                
-                self.worker.log("Cato Networks warning detected, clicking PROCEED button...")
-                
-                # Find and click the PROCEED button
-                from selenium.webdriver.common.by import By
-                from selenium.webdriver.support.ui import WebDriverWait
-                from selenium.webdriver.support import expected_conditions as EC
-                
-                try:
-                    # Wait for and click the proceed button
-                    proceed_btn = WebDriverWait(self.worker.driver, 5).until(
-                        EC.element_to_be_clickable((By.CSS_SELECTOR, "button.proceed.prompt"))
-                    )
-                    proceed_btn.click()
-                    self.worker.log("✓ Clicked PROCEED button")
-                    
-                    # Wait 2 seconds then refresh
-                    time.sleep(2)
-                    self.worker.driver.refresh()
-                    self.worker.log("✓ Page refreshed after Cato warning")
-                    time.sleep(2)  # Wait for page to reload
-                    
-                    return True
-                except Exception as e:
-                    self.worker.log(f"Could not click PROCEED button: {str(e)}")
-                    return False
-            
-            return False
-        except Exception as e:
-            self.worker.log(f"Error checking for Cato warning: {str(e)}")
-            return False
     
     def _extract_xml_value(self, html_text, field_name):
         """Extract value from HTML table row. The data is in format:
