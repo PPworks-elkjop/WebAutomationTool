@@ -2466,6 +2466,16 @@ class App:
                                           cursor="hand2")
         self.user_manager_btn.pack(side="left", padx=(0, 5))
         
+        self.support_btn = tk.Button(settings_group, text="🛠️ AP Support", 
+                                     command=self._on_ap_support,
+                                     font=("Segoe UI", 10),
+                                     bg="#28A745", fg="white",
+                                     activebackground="#218838",
+                                     relief="flat", bd=0,
+                                     padx=15, pady=8,
+                                     cursor="hand2")
+        self.support_btn.pack(side="left", padx=(0, 5))
+        
         # Admin-only: Audit Log button
         if self.current_user['role'] == 'admin':
             self.audit_log_btn = tk.Button(settings_group, text="📋 Audit Log", 
@@ -3497,6 +3507,34 @@ class App:
             self._log_activity("Audit log opened")
         except Exception as e:
             messagebox.showerror("Error", f"Failed to open audit log: {e}")
+    
+    def _on_ap_support(self):
+        """Open the AP Support system."""
+        from ap_support_ui import APSearchDialog, APSupportWindow
+        from database_manager import DatabaseManager
+        
+        # Log activity
+        self.user_manager.log_activity(
+            username=self.current_user['username'],
+            activity_type='AP Support',
+            description='Opened AP Support system'
+        )
+        
+        try:
+            # Open search dialog
+            search_dialog = APSearchDialog(self.root, self.current_user['username'], DatabaseManager())
+            self.root.wait_window(search_dialog.dialog)
+            
+            # If an AP was selected, open support window
+            selected_ap = search_dialog.get_selected_ap()
+            if selected_ap:
+                APSupportWindow(self.root, selected_ap, self.current_user['username'], 
+                              DatabaseManager(), browser_helper=self)
+                self._log_activity(f"Opened support window for AP: {selected_ap['ap_id']}")
+        except Exception as e:
+            import traceback
+            messagebox.showerror("Error", f"Failed to open AP Support: {e}\n\n{traceback.format_exc()}")
+            self._log_activity(f"Error opening AP Support: {str(e)}")
     
     def _on_close_browser(self):
         """Handle Close Browser."""

@@ -217,6 +217,28 @@ class DatabaseManager:
                 )
             ''')
             
+            # Support Notes table (for AP support system)
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS support_notes (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    ap_id TEXT NOT NULL,
+                    user TEXT NOT NULL,
+                    headline TEXT NOT NULL,
+                    note TEXT NOT NULL,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_by TEXT,
+                    is_deleted BOOLEAN DEFAULT 0,
+                    FOREIGN KEY (ap_id) REFERENCES access_points(ap_id) ON DELETE CASCADE
+                )
+            ''')
+            
+            # Add support_status column to access_points if it doesn't exist
+            try:
+                cursor.execute('ALTER TABLE access_points ADD COLUMN support_status TEXT DEFAULT "active"')
+            except sqlite3.OperationalError:
+                pass  # Column already exists
+            
             # Performance metrics table
             cursor.execute('''
                 CREATE TABLE IF NOT EXISTS ap_metrics (
@@ -300,6 +322,9 @@ class DatabaseManager:
             cursor.execute('CREATE INDEX IF NOT EXISTS idx_user_activity_timestamp ON user_activity_log(timestamp)')
             cursor.execute('CREATE INDEX IF NOT EXISTS idx_user_activity_user ON user_activity_log(username)')
             cursor.execute('CREATE INDEX IF NOT EXISTS idx_user_activity_type ON user_activity_log(activity_type)')
+            cursor.execute('CREATE INDEX IF NOT EXISTS idx_support_notes_ap ON support_notes(ap_id)')
+            cursor.execute('CREATE INDEX IF NOT EXISTS idx_support_notes_created ON support_notes(created_at)')
+            cursor.execute('CREATE INDEX IF NOT EXISTS idx_ap_support_status ON access_points(support_status)')
             
             conn.commit()
     
@@ -897,4 +922,168 @@ class DatabaseManager:
                 print("Default admin user created: MasterBlaster")
             else:
                 print(f"Failed to create default admin: {message}")
+    
+    # ==================== Support Notes Methods ====================
+    
+    def add_support_note(self, ap_id: str, user: str, headline: str, note: str) -> Tuple[bool, str, int]:
+        """Add a support note for an AP.
+        
+        Returns:
+            Tuple of (success, message, note_id)
+        """
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute('''
+                    INSERT INTO support_notes (ap_id, user, headline, note, created_at, updated_at)
+                    VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                ''', (ap_id, user, headline, note))
+                note_id = cursor.lastrowid
+                conn.commit()
+                return True, "Note added successfully", note_id
+        except Exception as e:
+            return False, f"Error adding note: {str(e)}", -1
+    
+    def get_support_notes(self, ap_id: str, include_deleted: bool = False) -> List[Dict]:
+        """Get all support notes for an AP, ordered by most recent first."""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            if include_deleted:
+                query = 'SELECT * FROM support_notes WHERE ap_id = ? ORDER BY created_at DESC'
+            else:
+                query = 'SELECT * FROM support_notes WHERE ap_id = ? AND is_deleted = 0 ORDER BY created_at DESC'
+            cursor.execute(query, (ap_id,))
+            return [dict(row) for row in cursor.fetchall()]
+    
+    def get_support_note_by_id(self, note_id: int) -> Optional[Dict]:
+        """Get a specific support note by ID."""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute('SELECT * FROM support_notes WHERE id = ?', (note_id,))
+            row = cursor.fetchone()
+            return dict(row) if row else None
+    
+    def update_support_note(self, note_id: int, headline: str, note: str, user: str) -> Tuple[bool, str]:
+        """Update a support note (only the most recent note can be edited)."""
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute('''
+                    UPDATE support_notes 
+                    SET headline = ?, note = ?, updated_at = CURRENT_TIMESTAMP, updated_by = ?
+                    WHERE id = ?
+                ''', (headline, note, user, note_id))
+                conn.commit()
+                if cursor.rowcount > 0:
+                    return True, "Note updated successfully"
+                else:
+                    return False, "Note not found"
+        except Exception as e:
+            return False, f"Error updating note: {str(e)}"
+    
+    def delete_support_note(self, note_id: int, user: str) -> Tuple[bool, str]:
+        """Soft delete a support note (only the most recent note can be deleted)."""
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute('''
+                    UPDATE support_notes 
+                    SET is_deleted = 1, updated_at = CURRENT_TIMESTAMP, updated_by = ?
+                    WHERE id = ?
+                ''', (user, note_id))
+                conn.commit()
+                if cursor.rowcount > 0:
+                    return True, "Note deleted successfully"
+                else:
+                    return False, "Note not found"
+        except Exception as e:
+            return False, f"Error deleting note: {str(e)}"
+    
+    def is_latest_note(self, note_id: int, ap_id: str) -> bool:
+        """Check if a note is the most recent note for an AP."""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute('''
+                SELECT id FROM support_notes 
+                WHERE ap_id = ? AND is_deleted = 0 
+                ORDER BY created_at DESC LIMIT 1
+            ''', (ap_id,))
+            row = cursor.fetchone()
+            return row and row['id'] == note_id if row else False
+    
+    def update_support_status(self, ap_id: str, status: str) -> Tuple[bool, str]:
+        """Update the support status of an AP.
+        
+        Args:
+            ap_id: AP identifier
+            status: Support status (e.g., 'active', 'in_progress', 'resolved', 'pending')
+        """
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute('''
+                    UPDATE access_points 
+                    SET support_status = ?, updated_at = CURRENT_TIMESTAMP
+                    WHERE ap_id = ?
+                ''', (status, ap_id))
+                conn.commit()
+                if cursor.rowcount > 0:
+                    return True, "Support status updated"
+                else:
+                    return False, "AP not found"
+        except Exception as e:
+            return False, f"Error updating support status: {str(e)}"
+    
+    def search_aps_for_support(self, search_term: str = None, store_id: str = None, 
+                               support_status: str = None, has_open_tickets: bool = None) -> List[Dict]:
+        """Search for APs in the support system with various filters."""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            
+            query = 'SELECT * FROM access_points WHERE 1=1'
+            params = []
+            
+            if search_term:
+                query += ' AND (ap_id LIKE ? OR ip_address LIKE ?)'
+                search_pattern = f'%{search_term}%'
+                params.extend([search_pattern, search_pattern])
+            
+            if store_id:
+                query += ' AND (store_id LIKE ? OR store_alias LIKE ?)'
+                search_pattern = f'%{store_id}%'
+                params.extend([search_pattern, search_pattern])
+            
+            if support_status:
+                query += ' AND support_status = ?'
+                params.append(support_status)
+            
+            if has_open_tickets is not None:
+                if has_open_tickets:
+                    query += ''' AND EXISTS (
+                        SELECT 1 FROM jira_tickets 
+                        WHERE jira_tickets.ap_id = access_points.ap_id 
+                        AND jira_tickets.status NOT IN ('Closed', 'Resolved', 'Done')
+                    )'''
+                else:
+                    query += ''' AND NOT EXISTS (
+                        SELECT 1 FROM jira_tickets 
+                        WHERE jira_tickets.ap_id = access_points.ap_id 
+                        AND jira_tickets.status NOT IN ('Closed', 'Resolved', 'Done')
+                    )'''
+            
+            query += ' ORDER BY ap_id'
+            
+            cursor.execute(query, params)
+            rows = cursor.fetchall()
+            
+            # Decrypt sensitive fields
+            result = []
+            for row in rows:
+                ap_dict = dict(row)
+                for field in self.ENCRYPTED_FIELDS:
+                    if field in ap_dict and ap_dict[field]:
+                        ap_dict[field] = self._decrypt(ap_dict[field])
+                result.append(ap_dict)
+            
+            return result
 
