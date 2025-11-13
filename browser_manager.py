@@ -247,35 +247,79 @@ class BrowserManager:
                     page_source = self.driver.page_source
                     
                     if self.extract_xml_callback:
+                        # Extract basic info
                         extracted_ap_id = self.extract_xml_callback(page_source, "AP ID")
                         transmitter = self.extract_xml_callback(page_source, "Transmitter")
                         store_id = self.extract_xml_callback(page_source, "Store ID")
                         ip_address = self.extract_xml_callback(page_source, "IP Address") or tab_info['ip_address']
                         
-                        self.log(f"  AP ID: {extracted_ap_id}, Type: {transmitter}, Store: {store_id}, IP: {ip_address}")
+                        # Extract hardware/software info
+                        serial_number = self.extract_xml_callback(page_source, "Serial Number")
+                        software_version = self.extract_xml_callback(page_source, "Software Version")
+                        firmware_version = self.extract_xml_callback(page_source, "Firmware Version")
+                        hardware_revision = self.extract_xml_callback(page_source, "Hardware Revision")
+                        build = self.extract_xml_callback(page_source, "Build")
+                        configuration_mode = self.extract_xml_callback(page_source, "Configuration mode")
+                        uptime = self.extract_xml_callback(page_source, "Uptime")
+                        mac_address = self.extract_xml_callback(page_source, "MAC Address")
+                        
+                        # Extract status fields (need special handling for duplicate "Status" fields)
+                        service_status = self._extract_status_field(page_source, "service")
+                        communication_daemon_status = self._extract_status_field(page_source, "daemon")
+                        
+                        # Extract connectivity status
+                        connectivity_internet = self.extract_xml_callback(page_source, "Internet")
+                        connectivity_provisioning = self.extract_xml_callback(page_source, "Provisioning")
+                        connectivity_ntp_server = self.extract_xml_callback(page_source, "NTP Server")
+                        connectivity_apc_address = self.extract_xml_callback(page_source, "APC Address")
+                        
+                        self.log(f"  AP ID: {extracted_ap_id}, Type: {transmitter}, Store: {store_id}")
+                        self.log(f"  Serial: {serial_number}, SW: {software_version}, FW: {firmware_version}")
+                        self.log(f"  Service: {service_status}, Daemon: {communication_daemon_status}")
                         
                         if extracted_ap_id:
                             existing_ap = creds_manager.find_by_ap_id(extracted_ap_id)
                             
                             if existing_ap:
-                                changes_made = False
-                                if existing_ap.get("ip_address") != ip_address:
-                                    self.log(f"  Updating IP: {existing_ap.get('ip_address')} → {ip_address}")
-                                    existing_ap["ip_address"] = ip_address
-                                    changes_made = True
-                                if store_id and existing_ap.get("store_id") != store_id:
-                                    self.log(f"  Updating Store ID: {existing_ap.get('store_id')} → {store_id}")
-                                    existing_ap["store_id"] = store_id
-                                    changes_made = True
-                                if transmitter and existing_ap.get("type") != transmitter:
-                                    self.log(f"  Updating Type: {existing_ap.get('type')} → {transmitter}")
-                                    existing_ap["type"] = transmitter
-                                    changes_made = True
+                                # Prepare update data with all fields
+                                update_data = {}
                                 
-                                if changes_made:
-                                    existing_ap["last_modified"] = datetime.now().isoformat()
-                                    updated_count += 1
-                                    self.log(f"  ✓ Updated AP {extracted_ap_id} information")
+                                # Check and update all fields
+                                fields_to_update = [
+                                    ('ip_address', ip_address),
+                                    ('store_id', store_id),
+                                    ('type', transmitter),
+                                    ('serial_number', serial_number),
+                                    ('software_version', software_version),
+                                    ('firmware_version', firmware_version),
+                                    ('hardware_revision', hardware_revision),
+                                    ('build', build),
+                                    ('configuration_mode', configuration_mode),
+                                    ('service_status', service_status),
+                                    ('uptime', uptime),
+                                    ('communication_daemon_status', communication_daemon_status),
+                                    ('mac_address', mac_address),
+                                    ('connectivity_internet', connectivity_internet),
+                                    ('connectivity_provisioning', connectivity_provisioning),
+                                    ('connectivity_ntp_server', connectivity_ntp_server),
+                                    ('connectivity_apc_address', connectivity_apc_address)
+                                ]
+                                
+                                for field_name, new_value in fields_to_update:
+                                    if new_value and existing_ap.get(field_name) != new_value:
+                                        update_data[field_name] = new_value
+                                
+                                if update_data:
+                                    success, msg = creds_manager.update_credential(
+                                        existing_ap.get('store_id', ''), 
+                                        extracted_ap_id, 
+                                        update_data
+                                    )
+                                    if success:
+                                        updated_count += 1
+                                        self.log(f"  ✓ Updated {len(update_data)} fields for AP {extracted_ap_id}")
+                                    else:
+                                        self.log(f"  ✗ Failed to update AP {extracted_ap_id}: {msg}")
                             else:
                                 self.log(f"  AP {extracted_ap_id} not found in credentials database")
                     
@@ -286,7 +330,6 @@ class BrowserManager:
                     self.log(f"  Error collecting info for {ap_id}: {str(e)}")
             
             if updated_count > 0:
-                creds_manager.save()
                 self.log(f"✓ Updated {updated_count} AP records in credentials database")
             
             self.progress(f"Connected to {success_count}/{total_aps} APs", 100)
@@ -341,6 +384,27 @@ class BrowserManager:
                 status_dialog.enable_close()
             
             return {"status": "error", "message": error_msg}
+    
+    def _extract_status_field(self, html_text, context):
+        """Extract Status field based on context (service or daemon).
+        Service status appears first, daemon status appears later.
+        """
+        import re
+        
+        if context == "service":
+            # Service status is the first Status field
+            pattern = r'<th>Status:</th>\s*<td[^>]*>([^<]*)</td>'
+            match = re.search(pattern, html_text, re.IGNORECASE)
+            if match:
+                return match.group(1).strip()
+        elif context == "daemon":
+            # Daemon status is the second Status field
+            pattern = r'<th>Status:</th>\s*<td[^>]*>([^<]*)</td>'
+            matches = re.findall(pattern, html_text, re.IGNORECASE)
+            if len(matches) >= 2:
+                return matches[1].strip()
+        
+        return None
     
     def close(self):
         """Close the browser"""

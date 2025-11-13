@@ -2796,6 +2796,30 @@ class App:
         username = self.username_var.get().strip()
         password = self.password_var.get().strip()
         
+        # If only IP is provided, ask user for credential preference
+        if ip and not username and not password:
+            from tkinter import messagebox
+            response = messagebox.askyesnocancel(
+                "Credentials Required",
+                "No credentials provided.\n\n"
+                "Use default credentials?\n"
+                "• Yes = Use username: admin\n"
+                "• No = Enter credentials manually\n"
+                "• Cancel = Abort",
+                icon='question'
+            )
+            
+            if response is None:  # Cancel
+                return
+            elif response:  # Yes - use defaults
+                username = "admin"
+                password = "admin"
+                self.username_var.set(username)
+                self.password_var.set(password)
+            else:  # No - ask user to enter credentials
+                messagebox.showinfo("Enter Credentials", "Please enter Username and Password in the fields above.")
+                return
+        
         if not ip or not username or not password:
             messagebox.showwarning("Missing Information", "Please enter IP Address, Username, and Password")
             return
@@ -2886,11 +2910,33 @@ class App:
                     store_id = self._extract_xml_value(page_source, "Store ID")
                     ip_address = self._extract_xml_value(page_source, "IP Address") or ip
                     
+                    # Extract hardware/software info
+                    serial_number = self._extract_xml_value(page_source, "Serial Number")
+                    software_version = self._extract_xml_value(page_source, "Software Version")
+                    firmware_version = self._extract_xml_value(page_source, "Firmware Version")
+                    hardware_revision = self._extract_xml_value(page_source, "Hardware Revision")
+                    build = self._extract_xml_value(page_source, "Build")
+                    configuration_mode = self._extract_xml_value(page_source, "Configuration mode")
+                    uptime = self._extract_xml_value(page_source, "Uptime")
+                    mac_address = self._extract_xml_value(page_source, "MAC Address")
+                    
+                    # Extract status fields
+                    service_status = self._extract_status_field(page_source, "service")
+                    communication_daemon_status = self._extract_status_field(page_source, "daemon")
+                    
+                    # Extract connectivity status
+                    connectivity_internet = self._extract_xml_value(page_source, "Internet")
+                    connectivity_provisioning = self._extract_xml_value(page_source, "Provisioning")
+                    connectivity_ntp_server = self._extract_xml_value(page_source, "NTP Server")
+                    connectivity_apc_address = self._extract_xml_value(page_source, "APC Address")
+                    
                     self.worker.log(f"AP Information retrieved:")
                     self.worker.log(f"  AP ID: {ap_id}")
                     self.worker.log(f"  Transmitter: {transmitter}")
                     self.worker.log(f"  IP Address: {ip_address}")
                     self.worker.log(f"  Store ID: {store_id}")
+                    self.worker.log(f"  Serial: {serial_number}, SW: {software_version}, FW: {firmware_version}")
+                    self.worker.log(f"  Service: {service_status}, Daemon: {communication_daemon_status}")
                     
                     if not ap_id:
                         self.worker.log("WARNING: Could not extract AP ID from status.xml")
@@ -2907,28 +2953,36 @@ class App:
                     # Compare with existing data
                     if existing_ap:
                         self.worker.log(f"AP {ap_id} found in credentials database")
-                        changes = []
-                        if existing_ap.get("ip_address") != ip_address:
-                            changes.append(f"IP: {existing_ap.get('ip_address')} → {ip_address}")
-                        if existing_ap.get("store_id") != store_id:
-                            changes.append(f"Store ID: {existing_ap.get('store_id')} → {store_id}")
                         
-                        if changes:
-                            self.worker.log(f"Changes detected: {changes}")
-                            msg = f"AP {ap_id} information has changed:\n" + "\n".join(changes)
-                            msg += "\n\nDo you want to update the stored information?"
-                            
-                            if messagebox.askyesno("Update AP Information", msg):
-                                existing_ap["ip_address"] = ip_address
-                                existing_ap["store_id"] = store_id
-                                existing_ap["username_webui"] = username
-                                existing_ap["password_webui"] = password
-                                existing_ap["type"] = transmitter
-                                existing_ap["last_modified"] = datetime.now().isoformat()
-                                creds_manager.save()
-                                self.worker.log("✓ AP information updated in database")
+                        # Prepare update data with all fields
+                        update_data = {
+                            "ip_address": ip_address,
+                            "store_id": store_id,
+                            "username_webui": username,
+                            "password_webui": password,
+                            "type": transmitter,
+                            "serial_number": serial_number,
+                            "software_version": software_version,
+                            "firmware_version": firmware_version,
+                            "hardware_revision": hardware_revision,
+                            "build": build,
+                            "configuration_mode": configuration_mode,
+                            "service_status": service_status,
+                            "uptime": uptime,
+                            "communication_daemon_status": communication_daemon_status,
+                            "mac_address": mac_address,
+                            "connectivity_internet": connectivity_internet,
+                            "connectivity_provisioning": connectivity_provisioning,
+                            "connectivity_ntp_server": connectivity_ntp_server,
+                            "connectivity_apc_address": connectivity_apc_address
+                        }
+                        
+                        # Update in database
+                        success, msg = creds_manager.update_credential(store_id, ap_id, update_data)
+                        if success:
+                            self.worker.log("✓ AP information updated in database")
                         else:
-                            self.worker.log("No changes detected in AP information")
+                            self.worker.log(f"✗ Failed to update AP: {msg}")
                     else:
                         self.worker.log(f"AP {ap_id} not found in credentials database")
                         # AP doesn't exist, ask to save
@@ -2952,7 +3006,20 @@ class App:
                                 "password_ssh": "",
                                 "su_password": "",
                                 "notes": "Added via Quick Connect",
-                                "last_modified": datetime.now().isoformat()
+                                "serial_number": serial_number,
+                                "software_version": software_version,
+                                "firmware_version": firmware_version,
+                                "hardware_revision": hardware_revision,
+                                "build": build,
+                                "configuration_mode": configuration_mode,
+                                "service_status": service_status,
+                                "uptime": uptime,
+                                "communication_daemon_status": communication_daemon_status,
+                                "mac_address": mac_address,
+                                "connectivity_internet": connectivity_internet,
+                                "connectivity_provisioning": connectivity_provisioning,
+                                "connectivity_ntp_server": connectivity_ntp_server,
+                                "connectivity_apc_address": connectivity_apc_address
                             }
                             
                             # Set default SSH credentials for SES-imagotag APs
@@ -3016,6 +3083,27 @@ class App:
         match = re.search(pattern, html_text, re.IGNORECASE)
         if match:
             return match.group(1).strip()
+        return None
+    
+    def _extract_status_field(self, html_text, context):
+        """Extract Status field based on context (service or daemon).
+        Service status appears first, daemon status appears later.
+        """
+        import re
+        
+        if context == "service":
+            # Service status is the first Status field
+            pattern = r'<th>Status:</th>\\s*<td[^>]*>([^<]*)</td>'
+            match = re.search(pattern, html_text, re.IGNORECASE)
+            if match:
+                return match.group(1).strip()
+        elif context == "daemon":
+            # Daemon status is the second Status field
+            pattern = r'<th>Status:</th>\\s*<td[^>]*>([^<]*)</td>'
+            matches = re.findall(pattern, html_text, re.IGNORECASE)
+            if len(matches) >= 2:
+                return matches[1].strip()
+        
         return None
     
     def _show_about(self):

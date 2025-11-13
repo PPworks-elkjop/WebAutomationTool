@@ -122,6 +122,20 @@ class DatabaseManager:
                     status TEXT DEFAULT 'unknown',  -- online, offline, unknown
                     last_seen TIMESTAMP,
                     last_ping_time REAL,
+                    serial_number TEXT,
+                    software_version TEXT,
+                    firmware_version TEXT,
+                    hardware_revision TEXT,
+                    build TEXT,
+                    configuration_mode TEXT,
+                    service_status TEXT,
+                    uptime TEXT,
+                    communication_daemon_status TEXT,
+                    mac_address TEXT,
+                    connectivity_internet TEXT,
+                    connectivity_provisioning TEXT,
+                    connectivity_ntp_server TEXT,
+                    connectivity_apc_address TEXT,
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )
@@ -141,6 +155,32 @@ class DatabaseManager:
                     FOREIGN KEY (ap_id) REFERENCES access_points(ap_id) ON DELETE CASCADE
                 )
             ''')
+            
+            # Add new columns to existing access_points table if they don't exist
+            # (for database migration)
+            new_columns = [
+                ('serial_number', 'TEXT'),
+                ('software_version', 'TEXT'),
+                ('firmware_version', 'TEXT'),
+                ('hardware_revision', 'TEXT'),
+                ('build', 'TEXT'),
+                ('configuration_mode', 'TEXT'),
+                ('service_status', 'TEXT'),
+                ('uptime', 'TEXT'),
+                ('communication_daemon_status', 'TEXT'),
+                ('mac_address', 'TEXT'),
+                ('connectivity_internet', 'TEXT'),
+                ('connectivity_provisioning', 'TEXT'),
+                ('connectivity_ntp_server', 'TEXT'),
+                ('connectivity_apc_address', 'TEXT')
+            ]
+            
+            for col_name, col_type in new_columns:
+                try:
+                    cursor.execute(f'ALTER TABLE access_points ADD COLUMN {col_name} {col_type}')
+                except sqlite3.OperationalError:
+                    # Column already exists, skip
+                    pass
             
             # Jira Tickets table
             cursor.execute('''
