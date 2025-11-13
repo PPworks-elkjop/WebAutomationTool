@@ -153,22 +153,65 @@ class WebAutomationWorker:
                 from selenium.webdriver.support import expected_conditions as EC
                 
                 try:
-                    # Wait for and click the proceed button
-                    proceed_btn = WebDriverWait(self.driver, 5).until(
-                        EC.element_to_be_clickable((By.CSS_SELECTOR, "button.proceed.prompt"))
-                    )
+                    # Try multiple selectors for the proceed button
+                    proceed_selectors = [
+                        "button.proceed.prompt",
+                        "button.proceed",
+                        "button[class*='proceed']",
+                        "//button[contains(text(), 'PROCEED')]",
+                        "//button[contains(@class, 'proceed')]"
+                    ]
+                    
+                    proceed_btn = None
+                    for selector in proceed_selectors:
+                        try:
+                            if selector.startswith("//"):
+                                # XPath selector
+                                proceed_btn = WebDriverWait(self.driver, 3).until(
+                                    EC.element_to_be_clickable((By.XPATH, selector))
+                                )
+                            else:
+                                # CSS selector
+                                proceed_btn = WebDriverWait(self.driver, 3).until(
+                                    EC.element_to_be_clickable((By.CSS_SELECTOR, selector))
+                                )
+                            self.log(f"✓ Found PROCEED button with selector: {selector}")
+                            break
+                        except:
+                            continue
+                    
+                    if not proceed_btn:
+                        self.log("✗ Could not find PROCEED button with any selector")
+                        return False
+                    
+                    # Click the button
                     proceed_btn.click()
                     self.log("✓ Clicked PROCEED button")
                     
-                    # Wait 2 seconds then refresh
-                    time.sleep(2)
+                    # Wait longer for page to process the click
+                    time.sleep(3)
+                    
+                    # Refresh the page
                     self.driver.refresh()
                     self.log("✓ Page refreshed after Cato warning")
-                    time.sleep(2)  # Wait for page to reload
+                    
+                    # Wait for page to fully reload
+                    time.sleep(4)
+                    
+                    # Wait for body element to be present (ensures page loaded)
+                    try:
+                        WebDriverWait(self.driver, 10).until(
+                            EC.presence_of_element_located((By.TAG_NAME, "body"))
+                        )
+                        self.log("✓ Page fully reloaded")
+                    except:
+                        self.log("⚠ Warning: Page reload might be incomplete")
                     
                     return True
                 except Exception as e:
                     self.log(f"Could not click PROCEED button: {str(e)}")
+                    import traceback
+                    self.log(traceback.format_exc())
                     return False
             
             return False
@@ -312,6 +355,8 @@ class WebAutomationWorker:
                     close_browser_callback=self.close_browser_callback,
                     ping_host_func=ping_host
                 )
+                # Set reconnect callback
+                self.status_dialog.reconnect_callback = self._reconnect_selected_aps
             
             # Use browser manager to open all APs
             result = self.browser_manager.open_multiple_aps(ap_list, self.status_dialog)
@@ -334,6 +379,43 @@ class WebAutomationWorker:
                 self.status_dialog.enable_close()
             
             return {"status": "error", "message": error_msg}
+    
+    def _reconnect_selected_aps(self, selected_aps):
+        """Reconnect to selected APs that failed or lost connection.
+        
+        Args:
+            selected_aps: List of AP dictionaries to reconnect
+        """
+        if not selected_aps:
+            return
+        
+        self.log(f"\n=== Reconnecting to {len(selected_aps)} selected APs ===")
+        
+        # Use browser manager to reconnect (it will handle opening tabs and logging in)
+        import threading
+        
+        def reconnect_thread():
+            try:
+                result = self.browser_manager.open_multiple_aps(selected_aps, self.status_dialog)
+                
+                # Update dialog summary
+                if self.status_dialog:
+                    if result["status"] == "success":
+                        self.status_dialog.update_summary(f"✓ Reconnected to {len(selected_aps)} APs successfully")
+                    else:
+                        self.status_dialog.update_summary(f"⚠ Reconnection completed with issues")
+                    self.status_dialog.enable_action_buttons()
+                
+            except Exception as e:
+                self.log(f"ERROR during reconnection: {str(e)}")
+                import traceback
+                self.log(traceback.format_exc())
+                if self.status_dialog:
+                    self.status_dialog.update_summary(f"✗ Reconnection error: {str(e)}")
+        
+        # Run reconnection in background thread
+        thread = threading.Thread(target=reconnect_thread, daemon=True)
+        thread.start()
     
     def manage_ssh_batch(self, action):
         """Execute SSH management on all connected APs (all tabs) in parallel."""

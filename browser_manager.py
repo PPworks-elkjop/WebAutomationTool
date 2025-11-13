@@ -49,6 +49,7 @@ class BrowserManager:
         chrome_options.add_argument('--no-sandbox')
         chrome_options.add_argument('--disable-dev-shm-usage')
         chrome_options.add_argument('--ignore-certificate-errors')
+        chrome_options.add_argument('--disable-web-security')
         chrome_options.add_argument('--ignore-ssl-errors')
         chrome_options.add_argument('--allow-insecure-localhost')
         chrome_options.add_experimental_option('excludeSwitches', ['enable-logging'])
@@ -56,7 +57,11 @@ class BrowserManager:
         
         service = Service(ChromeDriverManager().install())
         self.driver = webdriver.Chrome(service=service, options=chrome_options)
+        
+        # Set page load timeout to 30 seconds
+        self.driver.set_page_load_timeout(30)
         self.driver.implicitly_wait(10)
+        
         self.log("✓ Chrome driver initialized")
     
     def open_multiple_aps(self, ap_list, status_dialog=None):
@@ -140,7 +145,13 @@ class BrowserManager:
                     auth_header = 'Basic ' + base64.b64encode(f'{username}:{password}'.encode()).decode()
                     self.driver.execute_cdp_cmd('Network.setExtraHTTPHeaders', {'headers': {'Authorization': auth_header}})
                     
-                    self.driver.get(url)
+                    # Try to navigate with timeout handling
+                    from selenium.common.exceptions import TimeoutException
+                    try:
+                        self.driver.get(url)
+                    except TimeoutException:
+                        self.log(f"⚠ Navigation timeout for {ap_id}, but continuing...")
+                        # Page is still loading, we'll check the result in verification phase
                     
                     self.ap_tabs.append({
                         'handle': tab_handle,
@@ -153,8 +164,20 @@ class BrowserManager:
                     
                 except Exception as e:
                     self.log(f"✗ Failed to start navigation for {ap_id}: {str(e)}")
+                    
+                    # Still add to ap_tabs so we can show failure in status
+                    self.ap_tabs.append({
+                        'handle': tab_handle,
+                        'ap_info': ap,
+                        'ap_id': ap_id,
+                        'ip_address': ip_address,
+                        'url': url,
+                        'status': 'failed',
+                        'error': str(e)
+                    })
+                    
                     if status_dialog:
-                        status_dialog.update_status(ap_id, "failed", str(e))
+                        status_dialog.update_status(ap_id, "failed", f"Navigation error: {str(e)}")
             
             self.log(f"✓ All {total_aps} tabs are now loading")
             
@@ -166,13 +189,21 @@ class BrowserManager:
                 ap_id = tab_info['ap_id']
                 tab_handle = tab_info['handle']
                 
+                # Skip tabs that already failed in Phase 2
+                if tab_info.get('status') == 'failed':
+                    continue
+                
                 try:
                     self.log(f"Checking tab {index + 1}/{total_aps} for Cato warning: {ap_id}")
                     self.driver.switch_to.window(tab_handle)
-                    time.sleep(2)
+                    
+                    # Give page more time to load before checking for Cato
+                    time.sleep(3)
                     
                     if self.handle_cato_callback and self.handle_cato_callback():
-                        self.log(f"Handled Cato warning for {ap_id}")
+                        self.log(f"✓ Handled Cato warning for {ap_id}")
+                        # Give extra time after Cato handling
+                        time.sleep(2)
                     
                 except Exception as e:
                     self.log(f"Error checking Cato warning for {ap_id}: {str(e)}")
@@ -191,12 +222,60 @@ class BrowserManager:
                 tab_handle = tab_info['handle']
                 url = tab_info['url']
                 
+                # Check if this tab already failed in Phase 2
+                if tab_info.get('status') == 'failed':
+                    failed_aps.append(tab_info.get('error', 'Navigation error'))
+                    if status_dialog:
+                        error_msg = tab_info.get('error', 'Connection failed')
+                        status_dialog.update_status(ap_id, "failed", error_msg)
+                    continue
+                
                 try:
                     self.driver.switch_to.window(tab_handle)
                     current_url = self.driver.current_url
                     page_title = self.driver.title
+                    page_source = self.driver.page_source
                     
-                    if tab_info['ip_address'] in current_url or page_title:
+                    # Check for Chrome error pages
+                    is_error_page = False
+                    error_message = "Connection failed"
+                    
+                    # Common Chrome error indicators
+                    error_indicators = [
+                        ("ERR_CONNECTION_TIMED_OUT", "Connection timed out"),
+                        ("ERR_CONNECTION_REFUSED", "Connection refused"),
+                        ("ERR_NAME_NOT_RESOLVED", "Cannot resolve hostname"),
+                        ("ERR_ADDRESS_UNREACHABLE", "Address unreachable"),
+                        ("ERR_CONNECTION_RESET", "Connection reset"),
+                        ("ERR_NETWORK_CHANGED", "Network changed"),
+                        ("ERR_TIMED_OUT", "Request timed out"),
+                        ("ERR_FAILED", "Request failed"),
+                        ("This site can't be reached", "Site cannot be reached"),
+                        ("took too long to respond", "No response from server"),
+                        ("refused to connect", "Connection refused"),
+                        ("is not available", "Server not available")
+                    ]
+                    
+                    for indicator, message in error_indicators:
+                        if indicator in page_source or indicator in page_title:
+                            is_error_page = True
+                            error_message = message
+                            break
+                    
+                    # Also check if we're stuck on data:text/html or about:blank
+                    if current_url.startswith(('data:text/html', 'about:blank', 'chrome-error://')):
+                        is_error_page = True
+                        error_message = "Failed to load page"
+                    
+                    if is_error_page:
+                        tab_info['status'] = 'failed'
+                        error_msg = f"Failed to connect to {ap_id}: {error_message}"
+                        failed_aps.append(error_msg)
+                        self.log(f"✗ {error_msg}")
+                        
+                        if status_dialog:
+                            status_dialog.update_status(ap_id, "failed", error_message)
+                    elif tab_info['ip_address'] in current_url or page_title:
                         tab_info['status'] = 'connected'
                         success_count += 1
                         self.log(f"✓ {ap_id} connected successfully")

@@ -30,10 +30,12 @@ class ConnectionStatusDialog:
         # Store AP list and callbacks
         self.ap_list = ap_list
         self.ap_rows = {}  # Map ap_id to tree item
+        self.ap_selected = {}  # Track checkbox selections: ap_id -> bool
         self.provisioning_callback = provisioning_callback
         self.ssh_callback = ssh_callback
         self.close_browser_callback = close_browser_callback
         self.ping_host_func = ping_host_func
+        self.reconnect_callback = None  # Will be set externally
         
         # Initialize ping manager
         self.ping_manager = PingManager(ping_host_func) if ping_host_func else None
@@ -77,6 +79,25 @@ class ConnectionStatusDialog:
             bg="#F8F9FA",
             fg="#333333"
         ).pack(pady=(10, 15))
+        
+        # Reconnect button (always visible)
+        self.reconnect_btn = tk.Button(
+            button_panel,
+            text="Reconnect Selected",
+            command=self._on_reconnect,
+            font=("Segoe UI", 10),
+            bg="#28A745",
+            fg="white",
+            activebackground="#218838",
+            width=14,
+            cursor="hand2",
+            relief="flat",
+            bd=0,
+            padx=10,
+            pady=8,
+            state="disabled"
+        )
+        self.reconnect_btn.pack(pady=5, padx=10)
         
         # Provisioning button
         if self.provisioning_callback:
@@ -159,7 +180,7 @@ class ConnectionStatusDialog:
         
         self.tree = ttk.Treeview(
             tree_frame,
-            columns=("store_id", "ap_id", "ip_address", "result", "status", "message", "ping_btn", "ping_result", "ping_count"),
+            columns=("select", "store_id", "ap_id", "ip_address", "result", "status", "message", "ping_btn", "ping_result", "ping_count"),
             show="headings",
             yscrollcommand=vsb.set,
             xscrollcommand=hsb.set,
@@ -171,6 +192,7 @@ class ConnectionStatusDialog:
         hsb.config(command=self.tree.xview)
         
         # Configure columns
+        self.tree.heading("select", text="☐")
         self.tree.heading("store_id", text="Store ID")
         self.tree.heading("ap_id", text="AP ID")
         self.tree.heading("ip_address", text="IP Address")
@@ -181,6 +203,7 @@ class ConnectionStatusDialog:
         self.tree.heading("ping_result", text="Response")
         self.tree.heading("ping_count", text="#")
         
+        self.tree.column("select", width=40, anchor="center")
         self.tree.column("store_id", width=80, anchor="center")
         self.tree.column("ap_id", width=120, anchor="center")
         self.tree.column("ip_address", width=120, anchor="center")
@@ -203,7 +226,7 @@ class ConnectionStatusDialog:
         # Bind hover events for tooltips
         self.tree.bind("<Motion>", self._on_mouse_motion)
         self.tree.bind("<Leave>", self._on_mouse_leave)
-        self.tree.bind("<Button-1>", self._on_tree_click)  # Handle ping button clicks
+        self.tree.bind("<Button-1>", self._on_tree_click)  # Handle ping button and checkbox clicks
         self.tooltip = None
         
         # Grid layout
@@ -275,10 +298,11 @@ class ConnectionStatusDialog:
             item = self.tree.insert(
                 "",
                 "end",
-                values=(store_id, ap_id, ip_address, "?", "Pending", "Waiting to connect...", "⏵", "", ""),
+                values=("☐", store_id, ap_id, ip_address, "?", "Pending", "Waiting to connect...", "⏵", "", ""),
                 tags=("pending",)
             )
             self.ap_rows[ap_id] = item
+            self.ap_selected[ap_id] = False
     
     def update_status(self, ap_id, status, message="", result_indicator=None):
         """Update the status of an AP.
@@ -334,19 +358,20 @@ class ConnectionStatusDialog:
         # Truncate message for display (show first 50 chars)
         display_message = message if len(message) <= 50 else message[:47] + "..."
         
-        # Preserve ping columns (6, 7, 8) if they exist
-        ping_btn = current_values[6] if len(current_values) > 6 else "⏵"
-        ping_result = current_values[7] if len(current_values) > 7 else ""
-        ping_count = current_values[8] if len(current_values) > 8 else ""
+        # Preserve checkbox and ping columns
+        checkbox = current_values[0] if len(current_values) > 0 else "☐"
+        ping_btn = current_values[7] if len(current_values) > 7 else "⏵"
+        ping_result = current_values[8] if len(current_values) > 8 else ""
+        ping_count = current_values[9] if len(current_values) > 9 else ""
         
         # If result_indicator is None, preserve the current value (keep ? until SSH is checked)
         if result_indicator is None:
-            result_indicator = current_values[3] if len(current_values) > 3 else "?"
+            result_indicator = current_values[4] if len(current_values) > 4 else "?"
         
         # Update the row
         self.tree.item(
             item,
-            values=(current_values[0], current_values[1], current_values[2], result_indicator, status_text, display_message, ping_btn, ping_result, ping_count),
+            values=(checkbox, current_values[1], current_values[2], current_values[3], result_indicator, status_text, display_message, ping_btn, ping_result, ping_count),
             tags=(tag,)
         )
         
@@ -570,7 +595,7 @@ class ConnectionStatusDialog:
             self.close_browser_btn.config(state="disabled")
     
     def _on_tree_click(self, event):
-        """Handle clicks on the tree - specifically on ping buttons."""
+        """Handle clicks on the tree - specifically on checkboxes and ping buttons."""
         region = self.tree.identify_region(event.x, event.y)
         if region not in ["cell", "tree"]:
             return
@@ -581,12 +606,19 @@ class ConnectionStatusDialog:
         if not item or not column:
             return
         
-        # Ping button is column index 6 (0-based), which is #7 in Tkinter
-        if column == "#7":
-            values = self.tree.item(item, "values")
+        values = self.tree.item(item, "values")
+        
+        # Checkbox is column #1
+        if column == "#1":
             if len(values) >= 3:
-                ap_id = values[1]  # ap_id is in column 1
-                ip_address = values[2]  # ip_address is in column 2
+                ap_id = values[2]  # ap_id is in column 2 (was 1)
+                self._toggle_checkbox(ap_id, item)
+        
+        # Ping button is column index 7 (0-based), which is #8 in Tkinter (was #7)
+        elif column == "#8":
+            if len(values) >= 4:
+                ap_id = values[2]  # ap_id is in column 2 (was 1)
+                ip_address = values[3]  # ip_address is in column 3 (was 2)
                 
                 # Toggle ping state
                 if self.ping_manager and self.ping_manager.is_pinging(ap_id):
@@ -596,6 +628,52 @@ class ConnectionStatusDialog:
                     # Start ping
                     self._start_ping(ap_id, ip_address, item)
     
+    def _toggle_checkbox(self, ap_id, item):
+        """Toggle checkbox selection for an AP."""
+        # Toggle selection state
+        self.ap_selected[ap_id] = not self.ap_selected.get(ap_id, False)
+        
+        # Update checkbox display
+        current_values = list(self.tree.item(item, "values"))
+        current_values[0] = "☑" if self.ap_selected[ap_id] else "☐"
+        self.tree.item(item, values=current_values)
+        
+        # Update reconnect button state
+        self._update_reconnect_button()
+    
+    def _update_reconnect_button(self):
+        """Enable/disable reconnect button based on selections."""
+        has_selection = any(self.ap_selected.values())
+        if has_selection:
+            self.reconnect_btn.config(state="normal")
+        else:
+            self.reconnect_btn.config(state="disabled")
+    
+    def _on_reconnect(self):
+        """Handle Reconnect button click - reconnect to selected APs."""
+        # Get list of selected AP IDs
+        selected_ap_ids = [ap_id for ap_id, selected in self.ap_selected.items() if selected]
+        
+        if not selected_ap_ids:
+            return
+        
+        # Get full AP data for selected APs
+        selected_aps = [ap for ap in self.ap_list if ap.get('ap_id') in selected_ap_ids]
+        
+        # Call reconnect callback if set
+        if self.reconnect_callback:
+            self.reconnect_callback(selected_aps)
+        
+        # Reset status for selected APs to "Pending"
+        for ap_id in selected_ap_ids:
+            if ap_id in self.ap_rows:
+                item = self.ap_rows[ap_id]
+                current_values = list(self.tree.item(item, "values"))
+                # Preserve checkbox, keep other initial values
+                checkbox = current_values[0]
+                current_values = [checkbox, current_values[1], current_values[2], current_values[3], "?", "Pending", "Reconnecting...", "⏵", "", ""]
+                self.tree.item(item, values=current_values, tags=("pending",))
+    
     def _start_ping(self, ap_id, ip_address, item):
         """Start continuous ping for an AP."""
         if not self.ping_manager:
@@ -604,9 +682,9 @@ class ConnectionStatusDialog:
         
         # Update button to show "⏸"
         current_values = list(self.tree.item(item, "values"))
-        current_values[6] = "⏸"
-        current_values[7] = "Pinging..."
-        current_values[8] = "0"
+        current_values[7] = "⏸"
+        current_values[8] = "Pinging..."
+        current_values[9] = "0"
         self.tree.item(item, values=current_values)
         
         # Create update callback
@@ -617,8 +695,8 @@ class ConnectionStatusDialog:
                 
                 try:
                     current_values = list(self.tree.item(item, "values"))
-                    current_values[7] = result_text
-                    current_values[8] = str(count)
+                    current_values[8] = result_text
+                    current_values[9] = str(count)
                     self.tree.item(item, values=current_values)
                     
                     # Update background color based on result
@@ -652,7 +730,7 @@ class ConnectionStatusDialog:
         
         # Update button to show "⏵"
         current_values = list(self.tree.item(item, "values"))
-        current_values[6] = "⏵"
+        current_values[7] = "⏵"
         self.tree.item(item, values=current_values)
     
     def destroy(self):
