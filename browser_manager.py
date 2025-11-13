@@ -64,13 +64,14 @@ class BrowserManager:
         
         self.log("✓ Chrome driver initialized")
     
-    def open_multiple_aps(self, ap_list, status_dialog=None):
+    def open_multiple_aps(self, ap_list, status_dialog=None, is_reconnect=False):
         """
         Open browser with multiple AP tabs
         
         Args:
             ap_list: List of AP credential dictionaries
             status_dialog: Optional ConnectionStatusDialog for status updates
+            is_reconnect: If True, append to existing tabs instead of replacing them
             
         Returns:
             dict: Result with status and message
@@ -78,7 +79,10 @@ class BrowserManager:
         try:
             total_aps = len(ap_list)
             self.log(f"=== Opening browser with {total_aps} APs ===")
-            self.ap_tabs = []
+            
+            # Only reset ap_tabs if not reconnecting
+            if not is_reconnect:
+                self.ap_tabs = []
             
             # Initialize browser if not already open
             if not self.driver:
@@ -93,13 +97,15 @@ class BrowserManager:
             for index, ap in enumerate(ap_list):
                 ap_id = ap.get('ap_id', 'Unknown')
                 
-                if index == 0:
-                    tab_handle = self.driver.current_window_handle
-                    self.log(f"Using main tab for AP: {ap_id}")
-                else:
+                # For reconnect, always open new tabs
+                if is_reconnect or index > 0:
                     self.driver.execute_script("window.open('');")
                     tab_handle = self.driver.window_handles[-1]
-                    self.log(f"Opened tab {index + 1} for AP: {ap_id}")
+                    self.log(f"Opened new tab for AP: {ap_id}")
+                else:
+                    # First AP in initial connection uses current tab
+                    tab_handle = self.driver.current_window_handle
+                    self.log(f"Using main tab for AP: {ap_id}")
                 
                 tab_handles.append(tab_handle)
             

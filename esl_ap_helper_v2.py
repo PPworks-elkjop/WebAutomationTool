@@ -396,7 +396,12 @@ class WebAutomationWorker:
         
         def reconnect_thread():
             try:
-                result = self.browser_manager.open_multiple_aps(selected_aps, self.status_dialog)
+                # Pass is_reconnect=True to append new tabs instead of replacing
+                result = self.browser_manager.open_multiple_aps(selected_aps, self.status_dialog, is_reconnect=True)
+                
+                # Sync state with browser manager after reconnection
+                self.driver = self.browser_manager.driver
+                self.ap_tabs = self.browser_manager.ap_tabs
                 
                 # Update dialog summary
                 if self.status_dialog:
