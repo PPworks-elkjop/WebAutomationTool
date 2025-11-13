@@ -468,7 +468,8 @@ class AuditLogViewer:
         audit_filter_entry = ttk.Entry(audit_toolbar, textvariable=self.audit_filter_var, width=20)
         audit_filter_entry.pack(side="left", padx=(0, 5))
         ttk.Button(audit_toolbar, text="Filter", command=self._refresh_audit_log).pack(side="left", padx=(0, 5))
-        ttk.Button(audit_toolbar, text="Clear", command=lambda: [self.audit_filter_var.set(''), self._refresh_audit_log()]).pack(side="left")
+        ttk.Button(audit_toolbar, text="Clear", command=lambda: [self.audit_filter_var.set(''), self._refresh_audit_log()]).pack(side="left", padx=(0, 5))
+        ttk.Button(audit_toolbar, text="🔄 Refresh", command=self._refresh_audit_log).pack(side="left")
         
         # Audit log tree
         audit_scroll = ttk.Scrollbar(audit_frame)
@@ -503,7 +504,8 @@ class AuditLogViewer:
         activity_filter_entry = ttk.Entry(activity_toolbar, textvariable=self.activity_filter_var, width=20)
         activity_filter_entry.pack(side="left", padx=(0, 5))
         ttk.Button(activity_toolbar, text="Filter", command=self._refresh_activity_log).pack(side="left", padx=(0, 5))
-        ttk.Button(activity_toolbar, text="Clear", command=lambda: [self.activity_filter_var.set(''), self._refresh_activity_log()]).pack(side="left")
+        ttk.Button(activity_toolbar, text="Clear", command=lambda: [self.activity_filter_var.set(''), self._refresh_activity_log()]).pack(side="left", padx=(0, 5))
+        ttk.Button(activity_toolbar, text="🔄 Refresh", command=self._refresh_activity_log).pack(side="left")
         
         # Activity log tree
         activity_scroll = ttk.Scrollbar(activity_frame)

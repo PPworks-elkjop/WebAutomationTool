@@ -1,11 +1,12 @@
 import tkinter as tk
 from tkinter import ttk
+from ping_manager import PingManager
 
 class ConnectionStatusDialog:
     """Dialog showing real-time connection status for multiple APs."""
     
     def __init__(self, parent, ap_list, provisioning_callback=None, ssh_callback=None, 
-                 close_browser_callback=None, ping_selected_callback=None):
+                 close_browser_callback=None, ping_host_func=None):
         """Initialize the connection status dialog.
         
         Args:
@@ -14,11 +15,11 @@ class ConnectionStatusDialog:
             provisioning_callback: Callback for Provisioning button
             ssh_callback: Callback for SSH button
             close_browser_callback: Callback for Close Browser button
-            ping_selected_callback: Callback for Ping Selected button (receives list of selected APs)
+            ping_host_func: Function to ping a host (ip_address, timeout) -> (success, response_time)
         """
         self.dialog = tk.Toplevel(parent)
         self.dialog.title("Connection Status")
-        self.dialog.geometry("900x650")
+        self.dialog.geometry("1400x750")
         self.dialog.configure(bg="#FFFFFF")
         
         # Make it non-modal (stay on top but don't block interaction)
@@ -32,16 +33,19 @@ class ConnectionStatusDialog:
         self.provisioning_callback = provisioning_callback
         self.ssh_callback = ssh_callback
         self.close_browser_callback = close_browser_callback
-        self.ping_selected_callback = ping_selected_callback
+        self.ping_host_func = ping_host_func
+        
+        # Initialize ping manager
+        self.ping_manager = PingManager(ping_host_func) if ping_host_func else None
         
         self._create_ui()
         self._populate_aps()
         
         # Center the dialog
         self.dialog.update_idletasks()
-        x = (self.dialog.winfo_screenwidth() // 2) - (900 // 2)
-        y = (self.dialog.winfo_screenheight() // 2) - (650 // 2)
-        self.dialog.geometry(f"900x650+{x}+{y}")
+        x = (self.dialog.winfo_screenwidth() // 2) - (1400 // 2)
+        y = (self.dialog.winfo_screenheight() // 2) - (750 // 2)
+        self.dialog.geometry(f"1400x750+{x}+{y}")
     
     def _create_ui(self):
         """Create the UI elements."""
@@ -57,22 +61,110 @@ class ConnectionStatusDialog:
         )
         title_label.pack()
         
+        # Main content frame (holds button panel and tree)
+        content_frame = tk.Frame(self.dialog, bg="#FFFFFF")
+        content_frame.pack(fill="both", expand=True, padx=20, pady=10)
+        
+        # Left panel for action buttons
+        button_panel = tk.Frame(content_frame, bg="#F8F9FA", relief="flat", bd=1)
+        button_panel.pack(side="left", fill="y", padx=(0, 10))
+        
+        # Action buttons title
+        tk.Label(
+            button_panel,
+            text="Actions",
+            font=("Segoe UI", 11, "bold"),
+            bg="#F8F9FA",
+            fg="#333333"
+        ).pack(pady=(10, 15))
+        
+        # Provisioning button
+        if self.provisioning_callback:
+            self.provisioning_btn = tk.Button(
+                button_panel,
+                text="Provisioning",
+                command=self._on_provisioning,
+                font=("Segoe UI", 10),
+                bg="#FFC107",
+                fg="white",
+                activebackground="#E0A800",
+                width=14,
+                cursor="hand2",
+                relief="flat",
+                bd=0,
+                padx=10,
+                pady=8,
+                state="disabled"
+            )
+            self.provisioning_btn.pack(pady=5, padx=10)
+        
+        # SSH button
+        if self.ssh_callback:
+            self.ssh_btn = tk.Button(
+                button_panel,
+                text="SSH",
+                command=self._on_ssh,
+                font=("Segoe UI", 10),
+                bg="#17A2B8",
+                fg="white",
+                activebackground="#138496",
+                width=14,
+                cursor="hand2",
+                relief="flat",
+                bd=0,
+                padx=10,
+                pady=8,
+                state="disabled"
+            )
+            self.ssh_btn.pack(pady=5, padx=10)
+        
+        # Close Browser button
+        if self.close_browser_callback:
+            self.close_browser_btn = tk.Button(
+                button_panel,
+                text="Close Browser",
+                command=self._on_close_browser,
+                font=("Segoe UI", 10),
+                bg="#6C757D",
+                fg="white",
+                activebackground="#5A6268",
+                width=14,
+                cursor="hand2",
+                relief="flat",
+                bd=0,
+                padx=10,
+                pady=8,
+                state="disabled"
+            )
+            self.close_browser_btn.pack(pady=5, padx=10)
+        
+        # Separator
+        ttk.Separator(button_panel, orient="horizontal").pack(fill="x", pady=15, padx=10)
+        
         # Create treeview with scrollbar
-        tree_frame = tk.Frame(self.dialog, bg="#FFFFFF")
-        tree_frame.pack(fill="both", expand=True, padx=20, pady=10)
+        tree_frame = tk.Frame(content_frame, bg="#FFFFFF")
+        tree_frame.pack(side="left", fill="both", expand=True)
         
         # Scrollbars
         vsb = ttk.Scrollbar(tree_frame, orient="vertical")
         hsb = ttk.Scrollbar(tree_frame, orient="horizontal")
         
-        # Treeview
+        # Treeview with custom style for larger rows
+        style = ttk.Style()
+        style.configure("Custom.Treeview", rowheight=40, font=("Segoe UI", 10))
+        style.configure("Custom.Treeview.Heading", font=("Segoe UI", 10, "bold"))
+        
+        # Create a custom font tag for the ping column with much larger size
+        self.ping_font = ("Arial", 18, "bold")
+        
         self.tree = ttk.Treeview(
             tree_frame,
-            columns=("store_id", "ap_id", "ip_address", "result", "status", "message"),
+            columns=("store_id", "ap_id", "ip_address", "result", "status", "message", "ping_btn", "ping_result", "ping_count"),
             show="headings",
             yscrollcommand=vsb.set,
             xscrollcommand=hsb.set,
-            height=20
+            height=20,
+            style="Custom.Treeview"
         )
         
         vsb.config(command=self.tree.yview)
@@ -82,16 +174,22 @@ class ConnectionStatusDialog:
         self.tree.heading("store_id", text="Store ID")
         self.tree.heading("ap_id", text="AP ID")
         self.tree.heading("ip_address", text="IP Address")
-        self.tree.heading("result", text="")  # Visual indicator column (no header)
+        self.tree.heading("result", text="SSH")  # SSH status indicator
         self.tree.heading("status", text="Status")
         self.tree.heading("message", text="Message")
+        self.tree.heading("ping_btn", text="Ping")
+        self.tree.heading("ping_result", text="Response")
+        self.tree.heading("ping_count", text="#")
         
-        self.tree.column("store_id", width=100, anchor="center")
-        self.tree.column("ap_id", width=150, anchor="center")
-        self.tree.column("ip_address", width=150, anchor="center")
-        self.tree.column("result", width=40, anchor="center")  # Narrow column for ✓/✗
-        self.tree.column("status", width=120, anchor="center")
-        self.tree.column("message", width=310, anchor="w")
+        self.tree.column("store_id", width=80, anchor="center")
+        self.tree.column("ap_id", width=120, anchor="center")
+        self.tree.column("ip_address", width=120, anchor="center")
+        self.tree.column("result", width=30, anchor="center")  # Narrow column for ✓/✗
+        self.tree.column("status", width=100, anchor="center")
+        self.tree.column("message", width=250, anchor="w")
+        self.tree.column("ping_btn", width=60, anchor="center")
+        self.tree.column("ping_result", width=100, anchor="center")
+        self.tree.column("ping_count", width=40, anchor="center")
         
         # Configure tags for status colors
         self.tree.tag_configure("pending", background="#F8F9FA")
@@ -105,6 +203,7 @@ class ConnectionStatusDialog:
         # Bind hover events for tooltips
         self.tree.bind("<Motion>", self._on_mouse_motion)
         self.tree.bind("<Leave>", self._on_mouse_leave)
+        self.tree.bind("<Button-1>", self._on_tree_click)  # Handle ping button clicks
         self.tooltip = None
         
         # Grid layout
@@ -115,134 +214,56 @@ class ConnectionStatusDialog:
         tree_frame.grid_rowconfigure(0, weight=1)
         tree_frame.grid_columnconfigure(0, weight=1)
         
-        # Summary label
-        self.summary_label = tk.Label(
-            self.dialog,
-            text="Preparing to connect...",
-            font=("Arial", 10),
-            bg="#FFFFFF",
-            fg="#666666"
-        )
-        self.summary_label.pack(pady=10)
+        # Add spacer to push export/hide buttons to bottom of left panel
+        spacer = tk.Frame(button_panel, bg="#F8F9FA")
+        spacer.pack(expand=True, fill="both")
         
-        # Action button frame (for Provisioning, SSH, Close Browser, Ping Selected)
-        action_frame = tk.Frame(self.dialog, bg="#FFFFFF")
-        action_frame.pack(pady=5)
-        
-        # Provisioning button
-        if self.provisioning_callback:
-            self.provisioning_btn = tk.Button(
-                action_frame,
-                text="Provisioning",
-                command=self._on_provisioning,
-                font=("Segoe UI", 10),
-                bg="#FFC107",
-                fg="white",
-                activebackground="#E0A800",
-                width=12,
-                cursor="hand2",
-                relief="flat",
-                bd=0,
-                padx=10,
-                pady=5,
-                state="disabled"
-            )
-            self.provisioning_btn.pack(side="left", padx=5)
-        
-        # SSH button
-        if self.ssh_callback:
-            self.ssh_btn = tk.Button(
-                action_frame,
-                text="SSH",
-                command=self._on_ssh,
-                font=("Segoe UI", 10),
-                bg="#17A2B8",
-                fg="white",
-                activebackground="#138496",
-                width=12,
-                cursor="hand2",
-                relief="flat",
-                bd=0,
-                padx=10,
-                pady=5,
-                state="disabled"
-            )
-            self.ssh_btn.pack(side="left", padx=5)
-        
-        # Close Browser button
-        if self.close_browser_callback:
-            self.close_browser_btn = tk.Button(
-                action_frame,
-                text="Close Browser",
-                command=self._on_close_browser,
-                font=("Segoe UI", 10),
-                bg="#6C757D",
-                fg="white",
-                activebackground="#5A6268",
-                width=12,
-                cursor="hand2",
-                relief="flat",
-                bd=0,
-                padx=10,
-                pady=5,
-                state="disabled"
-            )
-            self.close_browser_btn.pack(side="left", padx=5)
-        
-        # Ping Selected button
-        if self.ping_selected_callback:
-            self.ping_selected_btn = tk.Button(
-                action_frame,
-                text="Ping Selected",
-                command=self._on_ping_selected,
-                font=("Segoe UI", 10),
-                bg="#28A745",
-                fg="white",
-                activebackground="#218838",
-                width=12,
-                cursor="hand2",
-                relief="flat",
-                bd=0,
-                padx=10,
-                pady=5
-            )
-            self.ping_selected_btn.pack(side="left", padx=5)
-        
-        # Button frame (for Export and Hide)
-        button_frame = tk.Frame(self.dialog, bg="#FFFFFF")
-        button_frame.pack(pady=10)
+        # Separator before bottom buttons
+        ttk.Separator(button_panel, orient="horizontal").pack(fill="x", pady=10, padx=10)
         
         # Export to Excel button
         self.export_button = tk.Button(
-            button_frame,
-            text="📊 Export to Excel",
+            button_panel,
+            text="📊 Export",
             command=self._on_export,
-            font=("Arial", 10),
+            font=("Segoe UI", 9),
             bg="#007BFF",
             fg="white",
-            width=18,
-            height=2,
+            width=14,
             cursor="hand2",
-            relief="raised",
-            bd=2
+            relief="flat",
+            bd=0,
+            padx=10,
+            pady=6
         )
-        self.export_button.pack(side="left", padx=5)
+        self.export_button.pack(pady=5, padx=10)
         
-        # Close button
+        # Hide Window button
         self.close_button = tk.Button(
-            button_frame,
+            button_panel,
             text="Hide Window",
             command=self._on_close,
-            font=("Arial", 10),
+            font=("Segoe UI", 9),
             bg="#6C757D",
             fg="white",
-            width=15,
-            height=2,
+            width=14,
             cursor="hand2",
-            relief="raised",
-            bd=2
+            relief="flat",
+            bd=0,
+            padx=10,
+            pady=6
         )
-        self.close_button.pack(side="left", padx=5)
+        self.close_button.pack(pady=(5, 10), padx=10)
+        
+        # Summary label at bottom of window
+        self.summary_label = tk.Label(
+            self.dialog,
+            text="Preparing to connect...",
+            font=("Arial", 9),
+            bg="#FFFFFF",
+            fg="#666666"
+        )
+        self.summary_label.pack(side="bottom", pady=5)
     
     def _populate_aps(self):
         """Populate the treeview with APs."""
@@ -254,7 +275,7 @@ class ConnectionStatusDialog:
             item = self.tree.insert(
                 "",
                 "end",
-                values=(store_id, ap_id, ip_address, "", "Pending", "Waiting to connect..."),
+                values=(store_id, ap_id, ip_address, "?", "Pending", "Waiting to connect...", "⏵", "", ""),
                 tags=("pending",)
             )
             self.ap_rows[ap_id] = item
@@ -284,31 +305,28 @@ class ConnectionStatusDialog:
         status_text, tag = status_map.get(status, (status, "pending"))
         
         # Auto-detect result indicator from message if not provided
-        # Logic: ✓ = enabled/on, ✗ = disabled/off, empty = unknown/connection/processing
+        # Logic: ✓ = SSH enabled, ✗ = SSH disabled, ? = not checked yet
         if result_indicator is None:
             msg_lower = message.lower()
-            # Check for explicit enabled/disabled states
-            if "ssh is already enabled" in msg_lower or "ssh enabled successfully" in msg_lower:
-                result_indicator = "✓"
-            elif "ssh is currently enabled" in msg_lower and "disabled" not in msg_lower:
-                result_indicator = "✓"
-            elif "ssh is currently disabled" in msg_lower or "ssh is already disabled" in msg_lower:
-                result_indicator = "✗"
-            elif "provisioning is on" in msg_lower or "provisioning enabled" in msg_lower:
-                result_indicator = "✓"
-            elif "provisioning is off" in msg_lower or "provisioning disabled" in msg_lower:
-                result_indicator = "✗"
-            elif "provisioning: report" in msg_lower and "enabled" in msg_lower:
-                result_indicator = "✓"
-            elif "provisioning: report" in msg_lower and "disabled" in msg_lower:
-                result_indicator = "✗"
-            # For connection, processing, or unclear states, leave empty
-            elif status == "connecting" or "connecting" in msg_lower or "processing" in msg_lower:
-                result_indicator = ""
-            elif status == "failed":
-                result_indicator = ""  # Failed to check, so we don't know the state
+            # Only update SSH indicator for SSH-related operations
+            if "ssh" in msg_lower:
+                # Check for explicit enabled/disabled states
+                if "ssh is already enabled" in msg_lower or "ssh enabled successfully" in msg_lower:
+                    result_indicator = "✓"
+                elif "ssh has been enabled" in msg_lower or "ssh: enable: ssh" in msg_lower:
+                    result_indicator = "✓"
+                elif "ssh is currently enabled" in msg_lower and "disabled" not in msg_lower:
+                    result_indicator = "✓"
+                elif "ssh is currently disabled" in msg_lower or "ssh is already disabled" in msg_lower:
+                    result_indicator = "✗"
+                elif "ssh has been disabled" in msg_lower or "ssh: disable: ssh" in msg_lower:
+                    result_indicator = "✗"
+                else:
+                    # SSH operation but unclear state (processing, error, etc)
+                    result_indicator = None  # Keep current value
             else:
-                result_indicator = ""  # Unknown state
+                # Non-SSH operation (connection, provisioning, etc) - don't change SSH status
+                result_indicator = None  # Keep current value
         
         # Store full message for tooltip
         self.full_messages[item] = message
@@ -316,10 +334,19 @@ class ConnectionStatusDialog:
         # Truncate message for display (show first 50 chars)
         display_message = message if len(message) <= 50 else message[:47] + "..."
         
+        # Preserve ping columns (6, 7, 8) if they exist
+        ping_btn = current_values[6] if len(current_values) > 6 else "⏵"
+        ping_result = current_values[7] if len(current_values) > 7 else ""
+        ping_count = current_values[8] if len(current_values) > 8 else ""
+        
+        # If result_indicator is None, preserve the current value (keep ? until SSH is checked)
+        if result_indicator is None:
+            result_indicator = current_values[3] if len(current_values) > 3 else "?"
+        
         # Update the row
         self.tree.item(
             item,
-            values=(current_values[0], current_values[1], current_values[2], result_indicator, status_text, display_message),
+            values=(current_values[0], current_values[1], current_values[2], result_indicator, status_text, display_message, ping_btn, ping_result, ping_count),
             tags=(tag,)
         )
         
@@ -524,34 +551,6 @@ class ConnectionStatusDialog:
         if self.close_browser_callback:
             self.close_browser_callback()
     
-    def _on_ping_selected(self):
-        """Handle Ping Selected button click."""
-        if self.ping_selected_callback:
-            # Get selected APs from the tree
-            selected_items = self.tree.selection()
-            if not selected_items:
-                from tkinter import messagebox
-                messagebox.showinfo("No Selection", "Please select one or more APs from the list.", parent=self.dialog)
-                return
-            
-            # Extract AP information from selected items
-            selected_aps = []
-            for item in selected_items:
-                values = self.tree.item(item, "values")
-                if len(values) >= 3:
-                    # Find the full AP info from the original list
-                    ap_id = values[1]
-                    ip_address = values[2]
-                    
-                    # Find matching AP in original list
-                    for ap in self.ap_list:
-                        if ap.get('ap_id') == ap_id or ap.get('ip_address') == ip_address:
-                            selected_aps.append(ap)
-                            break
-            
-            if selected_aps:
-                self.ping_selected_callback(selected_aps)
-    
     def enable_action_buttons(self):
         """Enable the action buttons (Provisioning, SSH, Close Browser)."""
         if hasattr(self, 'provisioning_btn'):
@@ -570,9 +569,99 @@ class ConnectionStatusDialog:
         if hasattr(self, 'close_browser_btn'):
             self.close_browser_btn.config(state="disabled")
     
+    def _on_tree_click(self, event):
+        """Handle clicks on the tree - specifically on ping buttons."""
+        region = self.tree.identify_region(event.x, event.y)
+        if region not in ["cell", "tree"]:
+            return
+        
+        column = self.tree.identify_column(event.x)
+        item = self.tree.identify_row(event.y)
+        
+        if not item or not column:
+            return
+        
+        # Ping button is column index 6 (0-based), which is #7 in Tkinter
+        if column == "#7":
+            values = self.tree.item(item, "values")
+            if len(values) >= 3:
+                ap_id = values[1]  # ap_id is in column 1
+                ip_address = values[2]  # ip_address is in column 2
+                
+                # Toggle ping state
+                if self.ping_manager and self.ping_manager.is_pinging(ap_id):
+                    # Stop ping
+                    self._stop_ping(ap_id, item)
+                else:
+                    # Start ping
+                    self._start_ping(ap_id, ip_address, item)
+    
+    def _start_ping(self, ap_id, ip_address, item):
+        """Start continuous ping for an AP."""
+        if not self.ping_manager:
+            print("No ping manager available")
+            return
+        
+        # Update button to show "⏸"
+        current_values = list(self.tree.item(item, "values"))
+        current_values[6] = "⏸"
+        current_values[7] = "Pinging..."
+        current_values[8] = "0"
+        self.tree.item(item, values=current_values)
+        
+        # Create update callback
+        def update_callback(result_text, count):
+            def update_ui():
+                if ap_id not in self.ap_rows:
+                    return
+                
+                try:
+                    current_values = list(self.tree.item(item, "values"))
+                    current_values[7] = result_text
+                    current_values[8] = str(count)
+                    self.tree.item(item, values=current_values)
+                    
+                    # Update background color based on result
+                    if "Timeout" in result_text or "Error" in result_text:
+                        self.tree.tag_configure(f"ping_fail_{ap_id}", background="#F8D7DA")
+                        current_tags = list(self.tree.item(item, "tags"))
+                        current_tags = [t for t in current_tags if not t.startswith("ping_")]
+                        current_tags.append(f"ping_fail_{ap_id}")
+                        self.tree.item(item, tags=current_tags)
+                    else:
+                        self.tree.tag_configure(f"ping_ok_{ap_id}", background="#D4EDDA")
+                        current_tags = list(self.tree.item(item, "tags"))
+                        current_tags = [t for t in current_tags if not t.startswith("ping_")]
+                        current_tags.append(f"ping_ok_{ap_id}")
+                        self.tree.item(item, tags=current_tags)
+                except:
+                    pass
+            
+            try:
+                self.dialog.after(0, update_ui)
+            except:
+                pass
+        
+        # Start ping using manager
+        self.ping_manager.start_ping(ap_id, ip_address, update_callback)
+    
+    def _stop_ping(self, ap_id, item):
+        """Stop continuous ping for an AP."""
+        if self.ping_manager:
+            self.ping_manager.stop_ping(ap_id)
+        
+        # Update button to show "⏵"
+        current_values = list(self.tree.item(item, "values"))
+        current_values[6] = "⏵"
+        self.tree.item(item, values=current_values)
+    
     def destroy(self):
         """Destroy the dialog."""
         try:
+            # Stop all ping threads using manager
+            if self.ping_manager:
+                self.ping_manager.stop_all()
+            
             self._destroy_tooltip()
             self.dialog.destroy()
         except:

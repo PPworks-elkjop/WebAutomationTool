@@ -32,6 +32,7 @@ except ImportError:
 
 # Import custom dialogs
 from connection_status_dialog import ConnectionStatusDialog
+from browser_manager import BrowserManager
 
 APP_NAME = "VERA"
 APP_TAGLINE = "Vusion support with a human touch"
@@ -110,6 +111,25 @@ class WebAutomationWorker:
         self.ssh_callback = ssh_callback
         self.close_browser_callback = close_browser_callback
         self.ping_selected_callback = ping_selected_callback
+        
+        # Initialize browser manager
+        self.browser_manager = BrowserManager(
+            log_callback=self.log,
+            progress_callback=self.progress,
+            extract_xml_callback=self._extract_xml_value,
+            handle_cato_callback=self.handle_cato_warning
+        )
+    
+    def _extract_xml_value(self, html_text, field_name):
+        """Extract value from HTML table row. The data is in format:
+        <tr><th>Field Name:</th><td>Value</td></tr>
+        """
+        import re
+        pattern = f"<th>{field_name}:</th>\\s*<td>([^<]*)</td>"
+        match = re.search(pattern, html_text, re.IGNORECASE)
+        if match:
+            return match.group(1).strip()
+        return None
     
     def handle_cato_warning(self):
         """Check for and handle Cato Networks warning page.
@@ -274,19 +294,14 @@ class WebAutomationWorker:
             return {"status": "error", "message": error_msg}
     
     def open_browser_with_multiple_aps(self, ap_list, max_parallel=5):
-        """Open browser with multiple APs in separate tabs (parallel connection).
+        """
+        Open browser and connect to multiple APs in tabs (max 5 simultaneously).
         
         Args:
             ap_list: List of AP credential dictionaries
             max_parallel: Maximum number of simultaneous connections (default: 5)
         """
         try:
-            total_aps = len(ap_list)
-            self.log(f"=== Opening browser with {total_aps} APs (MAX {max_parallel} PARALLEL) ===")
-            
-            # Store AP info for each tab
-            self.ap_tabs = []  # List of dicts: {handle, ap_info, status}
-            
             # Create status dialog
             if self.parent_window:
                 self.status_dialog = ConnectionStatusDialog(
@@ -295,224 +310,18 @@ class WebAutomationWorker:
                     provisioning_callback=self.provisioning_callback,
                     ssh_callback=self.ssh_callback,
                     close_browser_callback=self.close_browser_callback,
-                    ping_selected_callback=self.ping_selected_callback
+                    ping_host_func=ping_host
                 )
             
-            self.progress("Initializing browser...", 5)
+            # Use browser manager to open all APs
+            result = self.browser_manager.open_multiple_aps(ap_list, self.status_dialog)
             
-            # Setup Chrome options
-            chrome_options = Options()
-            chrome_options.add_argument('--disable-gpu')
-            chrome_options.add_argument('--no-sandbox')
-            chrome_options.add_argument('--disable-dev-shm-usage')
-            chrome_options.add_argument('--ignore-certificate-errors')
-            chrome_options.add_argument('--ignore-ssl-errors')
-            chrome_options.add_argument('--allow-insecure-localhost')
-            chrome_options.add_experimental_option('excludeSwitches', ['enable-logging'])
-            chrome_options.set_capability('acceptInsecureCerts', True)
+            # Sync state with browser manager
+            self.driver = self.browser_manager.driver
+            self.ap_tabs = self.browser_manager.ap_tabs
+            self.is_logged_in = result["status"] in ["success", "warning"]
             
-            self.log("Starting Chrome driver...")
-            service = Service(ChromeDriverManager().install())
-            self.driver = webdriver.Chrome(service=service, options=chrome_options)
-            self.driver.implicitly_wait(10)
-            
-            total_aps = len(ap_list)
-            
-            # PHASE 1: Open all tabs quickly
-            self.log(f"\n=== Phase 1: Opening {total_aps} tabs ===")
-            self.progress("Opening browser tabs...", 10)
-            
-            tab_handles = []
-            for index, ap in enumerate(ap_list):
-                ap_id = ap.get('ap_id', 'Unknown')
-                
-                if index == 0:
-                    # First tab - use current window
-                    tab_handle = self.driver.current_window_handle
-                    self.log(f"Using main tab for AP: {ap_id}")
-                else:
-                    # Open new tab
-                    self.driver.execute_script("window.open('');")
-                    tab_handle = self.driver.window_handles[-1]
-                    self.log(f"Opened tab {index + 1} for AP: {ap_id}")
-                
-                tab_handles.append(tab_handle)
-            
-            self.log(f"✓ All {total_aps} tabs opened")
-            
-            # PHASE 2: Start navigation on all tabs sequentially (don't wait for each to finish)
-            self.log(f"\n=== Phase 2: Starting navigation on all tabs ===")
-            self.progress("Starting navigation on all tabs...", 20)
-            
-            for index, (ap, tab_handle) in enumerate(zip(ap_list, tab_handles)):
-                ap_id = ap.get('ap_id', 'Unknown')
-                ip_address = ap.get('ip_address', '')
-                username = ap.get('username_webui', '')
-                password = ap.get('password_webui', '')
-                
-                # Update status: connecting
-                if self.status_dialog:
-                    self.status_dialog.update_status(ap_id, "connecting", "Starting navigation...")
-                
-                # Parse IP address and build URL
-                ip_address = ip_address.strip()
-                if ip_address.startswith('http://'):
-                    protocol = 'http'
-                    ip_address = ip_address[7:]
-                elif ip_address.startswith('https://'):
-                    protocol = 'https'
-                    ip_address = ip_address[8:]
-                else:
-                    protocol = 'https'
-                
-                if '@' in ip_address:
-                    ip_address = ip_address.split('@')[1]
-                
-                url = f"{protocol}://{ip_address}"
-                
-                try:
-                    self.log(f"Starting navigation for AP {index + 1}/{total_aps}: {ap_id}")
-                    
-                    # Switch to this tab
-                    self.driver.switch_to.window(tab_handle)
-                    
-                    # Set authentication via CDP
-                    self.driver.execute_cdp_cmd('Network.enable', {})
-                    auth_header = 'Basic ' + __import__('base64').b64encode(f'{username}:{password}'.encode()).decode()
-                    self.driver.execute_cdp_cmd('Network.setExtraHTTPHeaders', {'headers': {'Authorization': auth_header}})
-                    
-                    # Navigate to URL (start loading but don't wait)
-                    self.driver.get(url)
-                    
-                    # Store tab info immediately
-                    self.ap_tabs.append({
-                        'handle': tab_handle,
-                        'ap_info': ap,
-                        'ap_id': ap_id,
-                        'ip_address': ip_address,
-                        'url': url,
-                        'status': 'loading'
-                    })
-                    
-                except Exception as e:
-                    self.log(f"✗ Failed to start navigation for {ap_id}: {str(e)}")
-                    if self.status_dialog:
-                        self.status_dialog.update_status(ap_id, "failed", str(e))
-            
-            self.log(f"✓ All {total_aps} tabs are now loading")
-            
-            # PHASE 3: Handle Cato warnings on all tabs sequentially
-            self.log(f"\n=== Phase 3: Handling Cato warnings on all tabs ===")
-            self.progress("Checking for Cato warnings...", 50)
-            
-            for index, tab_info in enumerate(self.ap_tabs):
-                ap_id = tab_info['ap_id']
-                tab_handle = tab_info['handle']
-                
-                try:
-                    self.log(f"Checking tab {index + 1}/{total_aps} for Cato warning: {ap_id}")
-                    
-                    # Switch to this tab
-                    self.driver.switch_to.window(tab_handle)
-                    
-                    # Wait 2 seconds for page to start loading
-                    time.sleep(2)
-                    
-                    # Check for and handle Cato warning
-                    if self.handle_cato_warning():
-                        self.log(f"Handled Cato warning for {ap_id}")
-                    
-                except Exception as e:
-                    self.log(f"Error checking Cato warning for {ap_id}: {str(e)}")
-            
-            self.log(f"✓ Finished checking all tabs for Cato warnings")
-            
-            # PHASE 4: Verify connections
-            self.log(f"\n=== Phase 4: Verifying connections ===")
-            self.progress("Verifying all connections...", 80)
-            
-            success_count = 0
-            failed_aps = []
-            
-            for index, tab_info in enumerate(self.ap_tabs):
-                ap_id = tab_info['ap_id']
-                tab_handle = tab_info['handle']
-                url = tab_info['url']
-                
-                try:
-                    # Switch to tab
-                    self.driver.switch_to.window(tab_handle)
-                    
-                    # Check if we got a valid page (not an error page)
-                    current_url = self.driver.current_url
-                    page_title = self.driver.title
-                    
-                    # Simple check - if we're on the URL we tried to reach, consider it successful
-                    if tab_info['ip_address'] in current_url or page_title:
-                        tab_info['status'] = 'connected'
-                        success_count += 1
-                        self.log(f"✓ {ap_id} connected successfully")
-                        
-                        if self.status_dialog:
-                            self.status_dialog.update_status(ap_id, "connected", f"Connected to {url}")
-                    else:
-                        tab_info['status'] = 'failed'
-                        error_msg = f"Failed to connect to {ap_id}"
-                        failed_aps.append(error_msg)
-                        self.log(f"✗ {error_msg}")
-                        
-                        if self.status_dialog:
-                            self.status_dialog.update_status(ap_id, "failed", "Connection failed")
-                        
-                except Exception as e:
-                    tab_info['status'] = 'failed'
-                    error_msg = f"Failed to verify {ap_id}: {str(e)}"
-                    failed_aps.append(error_msg)
-                    self.log(f"✗ {error_msg}")
-                    
-                    if self.status_dialog:
-                        self.status_dialog.update_status(ap_id, "failed", str(e))
-            
-            self.is_logged_in = True
-            self.progress(f"Connected to {success_count}/{total_aps} APs", 100)
-            
-            # Switch back to first tab
-            if self.ap_tabs:
-                self.driver.switch_to.window(self.ap_tabs[0]['handle'])
-            
-            self.log(f"\n=== Connection Summary ===")
-            self.log(f"✓ Successfully connected: {success_count}")
-            if failed_aps:
-                self.log(f"✗ Failed connections: {len(failed_aps)}")
-                for failed in failed_aps:
-                    self.log(f"  - {failed}")
-            
-            # Update status dialog summary and enable close button
-            if self.status_dialog:
-                if success_count == total_aps:
-                    self.status_dialog.update_summary(f"✓ All {total_aps} APs connected successfully!")
-                elif success_count > 0:
-                    self.status_dialog.update_summary(f"Connected to {success_count}/{total_aps} APs. {len(failed_aps)} failed.")
-                else:
-                    self.status_dialog.update_summary(f"✗ Failed to connect to all APs")
-                self.status_dialog.enable_close()
-            
-            # Build result message
-            if success_count == total_aps:
-                return {
-                    "status": "success",
-                    "message": f"Successfully connected to all {total_aps} APs"
-                }
-            elif success_count > 0:
-                return {
-                    "status": "warning",
-                    "message": f"Connected to {success_count}/{total_aps} APs. Some connections failed."
-                }
-            else:
-                return {
-                    "status": "error",
-                    "message": "Failed to connect to any APs"
-                }
+            return result
             
         except Exception as e:
             import traceback
@@ -520,7 +329,6 @@ class WebAutomationWorker:
             self.log(f"ERROR: {error_msg}")
             self.log(traceback.format_exc())
             
-            # Update status dialog on error
             if self.status_dialog:
                 self.status_dialog.update_summary(f"✗ Error: {str(e)}")
                 self.status_dialog.enable_close()
@@ -628,6 +436,21 @@ class WebAutomationWorker:
             self.log(f"Action: {action}")
             self.log(f"✓ Successful: {success_count}/{len(self.ap_tabs)}")
             self.log(f"✗ Failed: {failed_count}/{len(self.ap_tabs)}")
+            
+            # Log individual AP results if user_manager callback is available
+            if hasattr(self, 'user_manager_callback') and self.user_manager_callback:
+                for result_item in results:
+                    ap_id = result_item['ap_id']
+                    success = result_item['success']
+                    message = result_item['result'].get('message', '')
+                    
+                    self.user_manager_callback(
+                        activity_type=f'SSH {action}',
+                        description=message,
+                        ap_id=ap_id,
+                        success=success,
+                        details={'action': action}
+                    )
             
             # Update status dialog summary
             if self.status_dialog:
@@ -770,6 +593,21 @@ class WebAutomationWorker:
             self.log(f"Action: {action}")
             self.log(f"✓ Successful: {success_count}/{len(self.ap_tabs)}")
             self.log(f"✗ Failed: {failed_count}/{len(self.ap_tabs)}")
+            
+            # Log individual AP results if user_manager callback is available
+            if hasattr(self, 'user_manager_callback') and self.user_manager_callback:
+                for result_item in results:
+                    ap_id = result_item['ap_id']
+                    success = result_item['success']
+                    message = result_item['result'].get('message', '')
+                    
+                    self.user_manager_callback(
+                        activity_type=f'Provisioning {action}',
+                        description=message,
+                        ap_id=ap_id,
+                        success=success,
+                        details={'action': action}
+                    )
             
             # Update status dialog summary
             if self.status_dialog:
@@ -2341,6 +2179,11 @@ class App:
         self.root = root
         self.current_user = current_user
         self.settings = load_settings()
+        
+        # Initialize user manager for activity logging
+        from user_manager_v2 import UserManager
+        self.user_manager = UserManager()
+        
         self.worker = WebAutomationWorker(
             self._update_progress, 
             self._log_activity, 
@@ -2350,6 +2193,15 @@ class App:
             close_browser_callback=self._on_close_browser,
             ping_selected_callback=self._on_ping_selected
         )
+        
+        # Set user_manager callback for activity logging in batch operations
+        def user_manager_log_wrapper(**kwargs):
+            """Wrapper to add username to activity logging."""
+            self.user_manager.log_activity(
+                username=self.current_user['username'],
+                **kwargs
+            )
+        self.worker.user_manager_callback = user_manager_log_wrapper
         
         # Configure window
         root.title(f"{APP_NAME} v{APP_VERSION} - {current_user['full_name']} ({current_user['role']})")
@@ -2527,6 +2379,18 @@ class App:
                                           cursor="hand2")
         self.user_manager_btn.pack(side="left", padx=(0, 5))
         
+        # Admin-only: Audit Log button
+        if self.current_user['role'] == 'admin':
+            self.audit_log_btn = tk.Button(settings_group, text="📋 Audit Log", 
+                                          command=self._on_audit_log,
+                                          font=("Segoe UI", 10),
+                                          bg="#6C757D", fg="white",
+                                          activebackground="#5A6268",
+                                          relief="flat", bd=0,
+                                          padx=15, pady=8,
+                                          cursor="hand2")
+            self.audit_log_btn.pack(side="left", padx=(0, 5))
+        
         self.about_btn = tk.Button(settings_group, text="About", 
                                    command=self._show_about,
                                    font=("Segoe UI", 10),
@@ -2670,6 +2534,14 @@ class App:
             messagebox.showwarning("Missing IP Address", "Please enter an IP Address to ping")
             return
         
+        # Log activity
+        self.user_manager.log_activity(
+            username=self.current_user['username'],
+            activity_type='Ping AP',
+            description=f'Pinging AP at {ip}',
+            details={'ip_address': ip}
+        )
+        
         def task():
             try:
                 self._log_activity(f"Pinging {ip}...")
@@ -2706,6 +2578,14 @@ class App:
             if not all_credentials:
                 messagebox.showinfo("No APs Found", "No Access Points configured in credential manager.\n\nPlease add AP credentials first.")
                 return
+            
+            # Log activity
+            self.user_manager.log_activity(
+                username=self.current_user['username'],
+                activity_type='Ping All APs',
+                description=f'Pinging all {len(all_credentials)} APs in credentials',
+                details={'ap_count': len(all_credentials)}
+            )
             
             # Show confirmation dialog
             total = len(all_credentials)
@@ -2758,11 +2638,29 @@ class App:
                             status = f"✓ ONLINE  ({response_time}ms)"
                             self.results_text.insert("end", f"{status:25} {ap_id:20} {ip}\n", "online")
                             self._log_activity(f"  ✓ {ap_id} is online ({response_time}ms)")
+                            # Log individual AP ping success
+                            self.user_manager.log_activity(
+                                username=self.current_user['username'],
+                                activity_type='Ping AP Result',
+                                description=f'AP is online ({response_time}ms)',
+                                ap_id=ap_id,
+                                success=True,
+                                details={'ip_address': ip, 'response_time': response_time}
+                            )
                         else:
                             offline += 1
                             status = "✗ OFFLINE"
                             self.results_text.insert("end", f"{status:25} {ap_id:20} {ip}\n", "offline")
                             self._log_activity(f"  ✗ {ap_id} is offline")
+                            # Log individual AP ping failure
+                            self.user_manager.log_activity(
+                                username=self.current_user['username'],
+                                activity_type='Ping AP Result',
+                                description='AP is offline',
+                                ap_id=ap_id,
+                                success=False,
+                                details={'ip_address': ip}
+                            )
                     
                     # Configure text tags for colored output
                     self.results_text.tag_config("online", foreground="#28A745")
@@ -2901,6 +2799,14 @@ class App:
         if not ip or not username or not password:
             messagebox.showwarning("Missing Information", "Please enter IP Address, Username, and Password")
             return
+        
+        # Log activity
+        self.user_manager.log_activity(
+            username=self.current_user['username'],
+            activity_type='Quick Connect',
+            description=f'Connecting to AP at {ip}',
+            details={'ip_address': ip}
+        )
         
         def task():
             try:
@@ -3061,6 +2967,20 @@ class App:
                             else:
                                 self.worker.log(f"Failed to save AP: {message}")
                     
+                    # Log successful connection with AP ID
+                    self.user_manager.log_activity(
+                        username=self.current_user['username'],
+                        activity_type='Quick Connect Complete',
+                        description=f'Successfully connected to AP {ap_id}',
+                        ap_id=ap_id,
+                        success=True,
+                        details={
+                            'ip_address': ip_address,
+                            'store_id': store_id,
+                            'type': transmitter
+                        }
+                    )
+                    
                     self._display_result({
                         "status": "success",
                         "message": f"Successfully connected to AP {ap_id}"
@@ -3119,11 +3039,43 @@ class App:
             self._update_progress("No APs selected", 0)
             return
         
+        # Log activity
+        ap_ids = [ap.get('ap_id', 'Unknown') for ap in selected_aps]
+        self.user_manager.log_activity(
+            username=self.current_user['username'],
+            activity_type='Browser Login',
+            description=f'Opening browser with {len(selected_aps)} APs',
+            details={'ap_count': len(selected_aps), 'ap_ids': ap_ids}
+        )
+        
         def task():
             self._update_progress(f"Connecting to {len(selected_aps)} APs...", 0)
             # Limit to 5 simultaneous connections for stability
             result = self.worker.open_browser_with_multiple_aps(selected_aps, max_parallel=5)
             self._display_result(result)
+            
+            # Log completion with actual connected APs
+            if 'connected_ap_ids' in result and result['connected_ap_ids']:
+                self.user_manager.log_activity(
+                    username=self.current_user['username'],
+                    activity_type='Browser Login Complete',
+                    description=f'Successfully connected to {len(result["connected_ap_ids"])} APs',
+                    success=True,
+                    details={
+                        'connected_ap_ids': result['connected_ap_ids'],
+                        'failed_ap_ids': result.get('failed_ap_ids', [])
+                    }
+                )
+                # Log individual AP connections
+                for ap_id in result['connected_ap_ids']:
+                    self.user_manager.log_activity(
+                        username=self.current_user['username'],
+                        activity_type='AP Connection',
+                        description=f'Connected to AP via browser',
+                        ap_id=ap_id,
+                        success=True
+                    )
+            
             # Enable buttons if we have at least one successful connection (success or warning)
             if result["status"] in ["success", "warning"]:
                 # Enable browser operation buttons in status dialog after successful login
@@ -3139,6 +3091,13 @@ class App:
     def _on_check_provisioning(self):
         """Handle Step 3: Check Provisioning."""
         from provisioning_dialog import ProvisioningDialog
+        
+        # Log activity
+        self.user_manager.log_activity(
+            username=self.current_user['username'],
+            activity_type='Provisioning Check',
+            description='Checking provisioning status'
+        )
         
         # Show dialog to get action
         dialog = ProvisioningDialog(self.root)
@@ -3166,6 +3125,14 @@ class App:
         if action is None:  # User canceled
             self._update_progress("Operation canceled", 0)
             return
+        
+        # Log activity
+        self.user_manager.log_activity(
+            username=self.current_user['username'],
+            activity_type='SSH Management',
+            description=f'Managing SSH ({action})',
+            details={'action': action}
+        )
         
         def task():
             self._update_progress(f"Managing SSH ({action})...", 0)
@@ -3304,6 +3271,13 @@ class App:
         from credential_manager_gui import CredentialManagerGUI
         
         try:
+            # Log activity
+            self.user_manager.log_activity(
+                username=self.current_user['username'],
+                activity_type='Credential Manager',
+                description='Opened credential manager'
+            )
+            
             # Open credential manager as a toplevel window with current user context
             CredentialManagerGUI(self.current_user, self.root)
             self._log_activity("Credential manager opened")
@@ -3314,14 +3288,50 @@ class App:
         """Open the user manager."""
         from user_manager_gui_v2 import UserManagerGUI
         
+        # Log activity
+        self.user_manager.log_activity(
+            username=self.current_user['username'],
+            activity_type='User Manager',
+            description='Opened user manager'
+        )
+        
         try:
             UserManagerGUI(self.current_user, self.root)
             self._log_activity("User manager opened")
         except Exception as e:
             messagebox.showerror("Error", f"Failed to open user manager: {e}")
     
+    def _on_audit_log(self):
+        """Open the audit log window (Admin only)."""
+        from user_manager_gui_v2 import AuditLogWindow
+        
+        # Verify admin status
+        if self.current_user['role'] != 'admin':
+            messagebox.showerror("Access Denied", "Only administrators can view audit logs")
+            return
+        
+        # Log activity
+        self.user_manager.log_activity(
+            username=self.current_user['username'],
+            activity_type='Audit Log',
+            description='Opened audit log window'
+        )
+        
+        try:
+            AuditLogWindow(self.root, self.user_manager)
+            self._log_activity("Audit log opened")
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to open audit log: {e}")
+    
     def _on_close_browser(self):
         """Handle Close Browser."""
+        # Log activity
+        self.user_manager.log_activity(
+            username=self.current_user['username'],
+            activity_type='Close Browser',
+            description='Closing browser session'
+        )
+        
         def task():
             result = self.worker.close()
             self._display_result(result)
