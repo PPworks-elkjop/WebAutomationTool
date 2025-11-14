@@ -598,7 +598,7 @@ class APSupportWindow:
         
         if note.get('updated_at') and note['updated_at'] != note['created_at']:
             tk.Label(header, text=f"Last edited: {note['updated_at']} by {note.get('updated_by', 'unknown')}", 
-                    font=("Segoe UI", 8, "italic"), fg="#888888", bg="#F8F9FA").pack(anchor="w", padx=15, pady=3)"}
+                    font=("Segoe UI", 8, "italic"), fg="#888888", bg="#F8F9FA").pack(anchor="w", padx=15, pady=3)
         
         # Headline
         headline_frame = tk.Frame(self.note_window, bg="#FFFFFF")
