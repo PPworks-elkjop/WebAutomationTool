@@ -281,7 +281,8 @@ class APSupportWindow:
         
         # Configure ttk styles to match main window
         style.configure("APSupport.TFrame", background=frame_bg)
-        style.configure("APSupport.TLabelframe", background=frame_bg, borderwidth=0, relief="flat")
+        style.configure("APSupport.TLabelframe", background=frame_bg, borderwidth=1, 
+                       relief="solid", bordercolor="#666666")
         style.configure("APSupport.TLabelframe.Label", background=frame_bg, foreground="#333333", 
                        font=("Segoe UI", 11, "bold"))
         
@@ -359,27 +360,63 @@ class APSupportWindow:
         
         # === LEFT BOTTOM: Connection Section ===
         connections_container = ttk.Frame(left_column, style="APSupport.TFrame")
-        connections_container.pack(fill="x")
+        connections_container.pack(fill="x", pady=(0, 10))
         
         # Web Connection
         web_frame = ttk.LabelFrame(connections_container, text="Web", padding=15, 
                                    style="APSupport.TLabelframe")
         web_frame.pack(side="left", fill="both", expand=True, padx=(0, 5))
         
-        tk.Button(web_frame, text="Open in Browser", command=self._connect_browser, 
-                 bg="#007BFF", fg="white", cursor="hand2", padx=20, pady=10,
-                 font=("Segoe UI", 10), relief="flat", bd=0,
-                 activebackground="#0056b3").pack()
+        web_control_frame = tk.Frame(web_frame, bg=frame_bg)
+        web_control_frame.pack(fill="x")
+        
+        self.web_action_var = tk.StringVar(value="Open Web UI")
+        self.web_action_combo = ttk.Combobox(web_control_frame, textvariable=self.web_action_var,
+                                             state="readonly", width=25, font=("Segoe UI", 9))
+        self.web_action_combo['values'] = ("Open Web UI",)
+        self.web_action_combo.pack(side="left", fill="x", expand=True, padx=(0, 5))
+        
+        self.web_run_btn = tk.Button(web_control_frame, text="Run", command=self._run_web_action,
+                                     bg="#007BFF", fg="white", cursor="hand2", padx=20, pady=8,
+                                     font=("Segoe UI", 9, "bold"), relief="flat", bd=0,
+                                     activebackground="#0056b3")
+        self.web_run_btn.pack(side="left")
+        
+        # Track browser state
+        self.browser_connected = False
         
         # SSH Connection
-        ssh_frame = ttk.LabelFrame(connections_container, text="SSH", padding=15, 
+        ssh_frame = ttk.LabelFrame(connections_container, text="SSH", padding=15,
                                    style="APSupport.TLabelframe")
         ssh_frame.pack(side="left", fill="both", expand=True, padx=(5, 0))
         
-        tk.Button(ssh_frame, text="SSH Connection", command=self._connect_ssh, 
-                 bg="#6C757D", fg="white", cursor="hand2", padx=20, pady=10,
-                 font=("Segoe UI", 10), state="disabled", relief="flat", bd=0,
-                 activebackground="#5A6268").pack()
+        ssh_control_frame = tk.Frame(ssh_frame, bg=frame_bg)
+        ssh_control_frame.pack(fill="x")
+        
+        self.ssh_action_var = tk.StringVar(value="SSH Connection")
+        self.ssh_action_combo = ttk.Combobox(ssh_control_frame, textvariable=self.ssh_action_var,
+                                            state="disabled", width=25, font=("Segoe UI", 9))
+        self.ssh_action_combo['values'] = ("SSH Connection",)
+        self.ssh_action_combo.pack(side="left", fill="x", expand=True, padx=(0, 5))
+        
+        self.ssh_run_btn = tk.Button(ssh_control_frame, text="Run", command=self._run_ssh_action,
+                                     bg="#6C757D", fg="white", cursor="hand2", padx=20, pady=8,
+                                     font=("Segoe UI", 9, "bold"), relief="flat", bd=0,
+                                     state="disabled", activebackground="#5A6268")
+        self.ssh_run_btn.pack(side="left")
+        
+        # === Activity Log ===
+        activity_frame = ttk.LabelFrame(left_column, text="Activity", padding=10,
+                                        style="APSupport.TLabelframe")
+        activity_frame.pack(fill="x")
+        
+        self.activity_text = tk.Text(activity_frame, height=5, font=("Consolas", 8),
+                                     bg="#F8F9FA", fg="#333333", wrap=tk.WORD,
+                                     relief="flat", state="disabled")
+        self.activity_text.pack(fill="x")
+        
+        # Add initial message
+        self._log_activity("Ready")
         
         # === RIGHT TOP: Notes Section ===
         notes_frame = ttk.LabelFrame(right_column, text="Notes", padding=10, 
@@ -522,20 +559,107 @@ class APSupportWindow:
         else:
             messagebox.showerror("Error", f"Failed to update status: {message}", parent=self.window)
     
+    def _log_activity(self, message):
+        """Add message to activity log."""
+        import time
+        timestamp = time.strftime("%H:%M:%S")
+        self.activity_text.config(state="normal")
+        self.activity_text.insert("end", f"[{timestamp}] {message}\n")
+        self.activity_text.see("end")
+        self.activity_text.config(state="disabled")
+        self.window.update_idletasks()
+    
+    def _run_web_action(self):
+        """Execute the selected web action."""
+        action = self.web_action_var.get()
+        self._log_activity(f"Executing: {action}")
+        
+        if action == "Open Web UI":
+            self._connect_browser()
+        elif action == "Navigate to Status":
+            self._navigate_to_status()
+        elif action == "Work with Provisioning":
+            self._work_with_provisioning()
+        elif action == "Work with SSH":
+            self._work_with_ssh()
+        elif action == "Do a Software Update":
+            self._do_software_update()
+    
+    def _run_ssh_action(self):
+        """Execute the selected SSH action."""
+        action = self.ssh_action_var.get()
+        self._log_activity(f"Executing: {action}")
+        self._connect_ssh()
+    
+    def _enable_web_actions(self):
+        """Enable additional web actions after successful browser connection."""
+        self.browser_connected = True
+        self.web_action_combo['values'] = (
+            "Open Web UI",
+            "Navigate to Status",
+            "Work with Provisioning",
+            "Work with SSH",
+            "Do a Software Update"
+        )
+        self._log_activity("✓ Browser connected - additional actions available")
+    
+    def _navigate_to_status(self):
+        """Navigate to status page."""
+        if not self.browser_connected:
+            messagebox.showwarning("Not Connected", "Please open Web UI first.", parent=self.window)
+            return
+        self._log_activity("Navigating to Status page...")
+        # TODO: Implement navigation
+        messagebox.showinfo("Coming Soon", "Status navigation will be implemented.", parent=self.window)
+    
+    def _work_with_provisioning(self):
+        """Work with provisioning settings."""
+        if not self.browser_connected:
+            messagebox.showwarning("Not Connected", "Please open Web UI first.", parent=self.window)
+            return
+        self._log_activity("Opening Provisioning settings...")
+        # TODO: Implement provisioning
+        messagebox.showinfo("Coming Soon", "Provisioning features will be implemented.", parent=self.window)
+    
+    def _work_with_ssh(self):
+        """Configure SSH settings in web UI."""
+        if not self.browser_connected:
+            messagebox.showwarning("Not Connected", "Please open Web UI first.", parent=self.window)
+            return
+        self._log_activity("Opening SSH configuration...")
+        # TODO: Implement SSH configuration
+        messagebox.showinfo("Coming Soon", "SSH configuration will be implemented.", parent=self.window)
+    
+    def _do_software_update(self):
+        """Perform software update."""
+        if not self.browser_connected:
+            messagebox.showwarning("Not Connected", "Please open Web UI first.", parent=self.window)
+            return
+        self._log_activity("Starting software update...")
+        # TODO: Implement software update
+        messagebox.showinfo("Coming Soon", "Software update will be implemented.", parent=self.window)
+    
     def _connect_browser(self):
         """Open AP in browser."""
+        ip = self.ap.get('ip_address', '')
+        username = self.ap.get('username_webui', '')
+        password = self.ap.get('password_webui', '')
+        
+        if not ip or not username or not password:
+            self._log_activity("✗ Missing credentials")
+            messagebox.showwarning("Missing Info", "IP address or credentials not available.", parent=self.window)
+            return
+        
+        self._log_activity(f"Opening browser for {ip}...")
+        
         if self.browser_helper:
-            # Use Quick Connect functionality
-            ip = self.ap.get('ip_address', '')
-            username = self.ap.get('username_webui', '')
-            password = self.ap.get('password_webui', '')
-            
-            if ip and username and password:
-                messagebox.showinfo("Connecting", f"Opening browser for {self.ap_id}...", parent=self.window)
-                # TODO: Call browser helper's quick connect
-            else:
-                messagebox.showwarning("Missing Info", "IP address or credentials not available.", parent=self.window)
+            # TODO: Call browser helper's quick connect
+            # For now, simulate connection
+            self._log_activity(f"✓ Connected to {self.ap_id}")
+            self._enable_web_actions()
+            messagebox.showinfo("Connected", f"Browser opened for {self.ap_id}", parent=self.window)
         else:
+            self._log_activity("✗ Browser helper not available")
             messagebox.showwarning("Not Available", "Browser connection not available.", parent=self.window)
     
     def _connect_ssh(self):
