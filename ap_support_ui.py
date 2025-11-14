@@ -268,38 +268,27 @@ class APSupportWindow:
         self.window.geometry(f"900x700+{x}+{y}")
     
     def _create_ui(self):
-        """Create the support window UI."""
-        # Main container with scrollbar
-        main_frame = tk.Frame(self.window)
-        main_frame.pack(fill="both", expand=True)
+        """Create the support window UI with modern layout."""
+        # Main container - split into left and right columns
+        main_container = tk.Frame(self.window, bg="#f0f0f0")
+        main_container.pack(fill="both", expand=True, padx=10, pady=10)
         
-        # Canvas and scrollbar
-        canvas = tk.Canvas(main_frame)
-        scrollbar = ttk.Scrollbar(main_frame, orient="vertical", command=canvas.yview)
-        scrollable_frame = tk.Frame(canvas)
+        # LEFT COLUMN
+        left_column = tk.Frame(main_container, bg="#f0f0f0")
+        left_column.pack(side="left", fill="both", expand=True, padx=(0, 5))
         
-        scrollable_frame.bind(
-            "<Configure>",
-            lambda e: canvas.configure(scrollregion=canvas.bbox("all"))
-        )
+        # RIGHT COLUMN
+        right_column = tk.Frame(main_container, bg="#f0f0f0", width=350)
+        right_column.pack(side="right", fill="both", padx=(5, 0))
+        right_column.pack_propagate(False)
         
-        canvas.create_window((0, 0), window=scrollable_frame, anchor="nw")
-        canvas.configure(yscrollcommand=scrollbar.set)
-        
-        canvas.pack(side="left", fill="both", expand=True)
-        scrollbar.pack(side="right", fill="y")
-        
-        # Mouse wheel scrolling
-        def _on_mousewheel(event):
-            canvas.yview_scroll(int(-1*(event.delta/120)), "units")
-        canvas.bind_all("<MouseWheel>", _on_mousewheel)
-        
-        # === AP Information Section ===
-        info_frame = tk.LabelFrame(scrollable_frame, text="AP Information", padx=15, pady=15)
-        info_frame.pack(fill="x", padx=10, pady=10)
+        # === LEFT TOP: AP Information Section ===
+        info_frame = tk.LabelFrame(left_column, text="AP Information", padx=15, pady=15, 
+                                   bg="white", font=("Arial", 10, "bold"))
+        info_frame.pack(fill="x", pady=(0, 10))
         
         # Create info grid
-        info_grid = tk.Frame(info_frame)
+        info_grid = tk.Frame(info_frame, bg="white")
         info_grid.pack(fill="x")
         
         info_labels = [
@@ -307,8 +296,6 @@ class APSupportWindow:
             ("Store ID:", "store_id"),
             ("IP Address:", "ip_address"),
             ("Type:", "type"),
-            ("Status:", "status"),
-            ("Support Status:", "support_status"),
             ("Serial Number:", "serial_number"),
             ("Software Version:", "software_version"),
             ("Firmware Version:", "firmware_version"),
@@ -322,117 +309,110 @@ class APSupportWindow:
             row = idx // 2
             col = (idx % 2) * 2
             
-            tk.Label(info_grid, text=label_text, font=("Arial", 9, "bold"), anchor="w", width=18).grid(
-                row=row, column=col, sticky="w", padx=5, pady=3)
-            value_label = tk.Label(info_grid, text="", font=("Arial", 9), anchor="w")
+            tk.Label(info_grid, text=label_text, font=("Arial", 9, "bold"), anchor="w", 
+                    width=18, bg="white").grid(row=row, column=col, sticky="w", padx=5, pady=3)
+            value_label = tk.Label(info_grid, text="", font=("Arial", 9), anchor="w", bg="white")
             value_label.grid(row=row, column=col+1, sticky="w", padx=5, pady=3)
             self.info_labels[field] = value_label
         
-        # Support Status dropdown
-        status_row = tk.Frame(info_frame)
-        status_row.pack(fill="x", pady=(10, 0))
+        # === LEFT: Status Section ===
+        status_frame = tk.LabelFrame(left_column, text="Status", padx=15, pady=10, 
+                                     bg="white", font=("Arial", 10, "bold"))
+        status_frame.pack(fill="x", pady=(0, 10))
         
-        tk.Label(status_row, text="Change Support Status:", font=("Arial", 9, "bold")).pack(side="left")
+        status_inner = tk.Frame(status_frame, bg="white")
+        status_inner.pack(fill="x")
+        
+        tk.Label(status_inner, text="Support Status:", font=("Arial", 9, "bold"), 
+                bg="white").pack(side="left")
         self.support_status_var = tk.StringVar(value=self.ap.get('support_status', 'active'))
-        status_combo = ttk.Combobox(status_row, textvariable=self.support_status_var, width=15, state="readonly")
+        status_combo = ttk.Combobox(status_inner, textvariable=self.support_status_var, 
+                                    width=15, state="readonly")
         status_combo['values'] = ("active", "in_progress", "pending", "resolved", "closed")
         status_combo.pack(side="left", padx=10)
         status_combo.bind("<<ComboboxSelected>>", self._on_status_change)
         
-        # Refresh button
-        tk.Button(status_row, text="🔄 Refresh Data", command=self._refresh_ap_data,
+        tk.Button(status_inner, text="Refresh Data", command=self._refresh_ap_data,
                  bg="#17A2B8", fg="white", cursor="hand2", padx=15, pady=5,
-                 font=("Arial", 9)).pack(side="left", padx=10)
+                 font=("Arial", 9), relief="flat").pack(side="left", padx=5)
         
-        # === Connection Section ===
-        connect_frame = tk.LabelFrame(scrollable_frame, text="Connect to AP", padx=15, pady=15)
-        connect_frame.pack(fill="x", padx=10, pady=10)
+        # === LEFT MIDDLE: Placeholder for future features ===
+        middle_frame = tk.Frame(left_column, bg="#f0f0f0", height=100)
+        middle_frame.pack(fill="both", expand=True, pady=(0, 10))
         
-        btn_row = tk.Frame(connect_frame)
-        btn_row.pack()
+        # === LEFT BOTTOM: Connection Section ===
+        connections_container = tk.Frame(left_column, bg="#f0f0f0")
+        connections_container.pack(fill="x")
         
-        tk.Button(btn_row, text="🌐 Open in Browser", command=self._connect_browser, 
-                 bg="#007BFF", fg="white", cursor="hand2", padx=15, pady=8,
-                 font=("Arial", 10)).pack(side="left", padx=5)
+        # Web Connection
+        web_frame = tk.LabelFrame(connections_container, text="Web", padx=15, pady=10, 
+                                 bg="white", font=("Arial", 10, "bold"))
+        web_frame.pack(side="left", fill="both", expand=True, padx=(0, 5))
         
-        tk.Button(btn_row, text="🖥️ SSH Connection", command=self._connect_ssh, 
-                 bg="#17A2B8", fg="white", cursor="hand2", padx=15, pady=8,
-                 font=("Arial", 10), state="disabled").pack(side="left", padx=5)
+        tk.Button(web_frame, text="Open in Browser", command=self._connect_browser, 
+                 bg="#007BFF", fg="white", cursor="hand2", padx=20, pady=8,
+                 font=("Arial", 10), relief="flat").pack()
         
-        # === Support Notes Section ===
-        notes_frame = tk.LabelFrame(scrollable_frame, text="Support Notes", padx=15, pady=15)
-        notes_frame.pack(fill="both", expand=True, padx=10, pady=10)
+        # SSH Connection
+        ssh_frame = tk.LabelFrame(connections_container, text="SSH", padx=15, pady=10, 
+                                 bg="white", font=("Arial", 10, "bold"))
+        ssh_frame.pack(side="left", fill="both", expand=True, padx=(5, 0))
         
-        # New note entry
-        new_note_frame = tk.LabelFrame(notes_frame, text="New Note", padx=10, pady=10)
-        new_note_frame.pack(fill="x", pady=(0, 10))
+        tk.Button(ssh_frame, text="SSH Connection", command=self._connect_ssh, 
+                 bg="#6C757D", fg="white", cursor="hand2", padx=20, pady=8,
+                 font=("Arial", 10), state="disabled", relief="flat").pack()
         
-        tk.Label(new_note_frame, text="Headline:").pack(anchor="w")
-        self.headline_var = tk.StringVar()
-        tk.Entry(new_note_frame, textvariable=self.headline_var, font=("Arial", 10)).pack(fill="x", pady=(0, 5))
+        # === RIGHT TOP: Notes Section ===
+        notes_frame = tk.LabelFrame(right_column, text="Notes", padx=10, pady=10, 
+                                    bg="white", font=("Arial", 10, "bold"))
+        notes_frame.pack(fill="both", expand=True, pady=(0, 10))
         
-        tk.Label(new_note_frame, text="Note:").pack(anchor="w")
-        self.note_text = scrolledtext.ScrolledText(new_note_frame, height=4, font=("Arial", 10), wrap=tk.WORD)
-        self.note_text.pack(fill="x", pady=(0, 10))
+        # Notes list with scrollbar (2-row format: date/user, then headline)
+        notes_canvas = tk.Canvas(notes_frame, bg="white", highlightthickness=0)
+        notes_scroll = ttk.Scrollbar(notes_frame, orient="vertical", command=notes_canvas.yview)
+        self.notes_container = tk.Frame(notes_canvas, bg="white")
         
-        note_btn_frame = tk.Frame(new_note_frame)
-        note_btn_frame.pack(fill="x")
+        self.notes_container.bind(
+            "<Configure>",
+            lambda e: notes_canvas.configure(scrollregion=notes_canvas.bbox("all"))
+        )
         
-        tk.Button(note_btn_frame, text="Save Note", command=self._save_note, bg="#28A745", 
-                 fg="white", cursor="hand2", padx=20, pady=5).pack(side="left")
-        tk.Button(note_btn_frame, text="Clear", command=self._clear_note_form, bg="#6C757D", 
-                 fg="white", cursor="hand2", padx=20, pady=5).pack(side="left", padx=5)
+        notes_canvas.create_window((0, 0), window=self.notes_container, anchor="nw")
+        notes_canvas.configure(yscrollcommand=notes_scroll.set)
         
-        # Existing notes list
-        existing_notes_frame = tk.LabelFrame(notes_frame, text="Previous Notes", padx=10, pady=10)
-        existing_notes_frame.pack(fill="both", expand=True)
-        
-        # Notes listbox
-        notes_list_frame = tk.Frame(existing_notes_frame)
-        notes_list_frame.pack(fill="both", expand=True)
-        
-        notes_scroll = ttk.Scrollbar(notes_list_frame, orient="vertical")
-        self.notes_listbox = tk.Listbox(notes_list_frame, yscrollcommand=notes_scroll.set, 
-                                        font=("Arial", 9), height=8)
-        notes_scroll.config(command=self.notes_listbox.yview)
-        
-        self.notes_listbox.pack(side="left", fill="both", expand=True)
+        notes_canvas.pack(side="left", fill="both", expand=True)
         notes_scroll.pack(side="right", fill="y")
         
-        self.notes_listbox.bind("<<ListboxSelect>>", self._on_note_select)
-        
-        # Note detail/edit area
-        note_detail_frame = tk.Frame(existing_notes_frame)
-        note_detail_frame.pack(fill="x", pady=(10, 0))
-        
-        self.note_detail_text = scrolledtext.ScrolledText(note_detail_frame, height=6, 
-                                                          font=("Arial", 9), wrap=tk.WORD, state="disabled")
-        self.note_detail_text.pack(fill="both", expand=True)
-        
-        # Note action buttons
-        note_action_frame = tk.Frame(existing_notes_frame)
-        note_action_frame.pack(fill="x", pady=(5, 0))
-        
-        self.edit_note_btn = tk.Button(note_action_frame, text="Edit", command=self._edit_selected_note,
-                                       state="disabled", bg="#FFC107", cursor="hand2", padx=15)
-        self.edit_note_btn.pack(side="left", padx=2)
-        
-        self.delete_note_btn = tk.Button(note_action_frame, text="Delete", command=self._delete_selected_note,
-                                         state="disabled", bg="#DC3545", fg="white", cursor="hand2", padx=15)
-        self.delete_note_btn.pack(side="left", padx=2)
-        
-        self.save_edit_btn = tk.Button(note_action_frame, text="Save Changes", command=self._save_note_edit,
-                                       state="disabled", bg="#28A745", fg="white", cursor="hand2", padx=15)
-        self.save_edit_btn.pack(side="left", padx=2)
-        
-        self.cancel_edit_btn = tk.Button(note_action_frame, text="Cancel Edit", command=self._cancel_note_edit,
-                                         state="disabled", bg="#6C757D", fg="white", cursor="hand2", padx=15)
-        self.cancel_edit_btn.pack(side="left", padx=2)
+        # Mouse wheel scrolling for notes
+        def _on_notes_mousewheel(event):
+            notes_canvas.yview_scroll(int(-1*(event.delta/120)), "units")
+        notes_canvas.bind_all("<MouseWheel>", _on_notes_mousewheel)
         
         # Store notes data
         self.notes_data = []
-        self.selected_note_id = None
-        self.editing_note = False
+        self.note_widgets = []
+        self.note_window = None
+        self.note_window_modified = False
+        
+        # === RIGHT MIDDLE: Jira Tickets Placeholder ===
+        jira_frame = tk.LabelFrame(right_column, text="Jira Tickets", padx=10, pady=10, 
+                                   bg="white", font=("Arial", 10, "bold"))
+        jira_frame.pack(fill="x", pady=(0, 10))
+        
+        tk.Label(jira_frame, text="Jira integration coming soon...", 
+                font=("Arial", 9, "italic"), fg="gray", bg="white").pack()
+        
+        # === RIGHT BOTTOM: Action Buttons ===
+        action_frame = tk.Frame(right_column, bg="#f0f0f0")
+        action_frame.pack(fill="x")
+        
+        tk.Button(action_frame, text="Open Another AP", command=self._open_another_ap,
+                 bg="#007BFF", fg="white", cursor="hand2", padx=20, pady=8,
+                 font=("Arial", 10), relief="flat").pack(fill="x", pady=(0, 5))
+        
+        tk.Button(action_frame, text="Close Window", command=self._on_close,
+                 bg="#6C757D", fg="white", cursor="hand2", padx=20, pady=8,
+                 font=("Arial", 10), relief="flat").pack(fill="x")
     
     def _load_data(self):
         """Load AP data into the UI."""
@@ -480,16 +460,36 @@ class APSupportWindow:
                                parent=self.window)
     
     def _refresh_notes(self):
-        """Refresh the notes list."""
-        self.notes_listbox.delete(0, tk.END)
+        """Refresh the notes list with new 2-row format."""
+        # Clear existing widgets
+        for widget in self.note_widgets:
+            widget.destroy()
+        self.note_widgets.clear()
+        
+        # Load notes from database
         self.notes_data = self.db.get_support_notes(self.ap_id)
         
-        for note in self.notes_data:
-            created_at = note['created_at']
-            user = note['user']
-            headline = note['headline']
-            display = f"{created_at} - {user} - {headline}"
-            self.notes_listbox.insert(tk.END, display)
+        # Create note items in 2-row format
+        for idx, note in enumerate(self.notes_data):
+            note_frame = tk.Frame(self.notes_container, bg="white", relief="raised", 
+                                 borderwidth=1, cursor="hand2")
+            note_frame.pack(fill="x", pady=2, padx=2)
+            
+            # Row 1: Date/Time and User
+            row1 = tk.Label(note_frame, text=f"{note['created_at']} - {note['user']}", 
+                          font=("Arial", 8), fg="gray", bg="white", anchor="w")
+            row1.pack(fill="x", padx=5, pady=(2, 0))
+            
+            # Row 2: Headline
+            row2 = tk.Label(note_frame, text=note['headline'], 
+                          font=("Arial", 9, "bold"), bg="white", anchor="w")
+            row2.pack(fill="x", padx=5, pady=(0, 2))
+            
+            # Bind click events
+            for widget in [note_frame, row1, row2]:
+                widget.bind("<Button-1>", lambda e, n=note: self._open_note_window(n))
+            
+            self.note_widgets.append(note_frame)
     
     def _on_status_change(self, event=None):
         """Handle support status change."""
@@ -520,150 +520,235 @@ class APSupportWindow:
         """Connect via SSH (placeholder for future implementation)."""
         messagebox.showinfo("Coming Soon", "SSH connection will be available in a future update.", parent=self.window)
     
-    def _save_note(self):
-        """Save a new support note."""
-        headline = self.headline_var.get().strip()
-        note = self.note_text.get("1.0", tk.END).strip()
+    def _open_another_ap(self):
+        """Open the AP search dialog to open another AP support window."""
+        # Import here to avoid circular dependency
+        from ap_support_ui import APSearchDialog
         
-        if not headline:
-            messagebox.showwarning("Missing Headline", "Please enter a headline for the note.", parent=self.window)
-            return
+        search_dialog = APSearchDialog(self.window, self.db, self.current_user)
+        selected_ap = search_dialog.get_selected_ap()
         
-        if not note:
-            messagebox.showwarning("Missing Note", "Please enter note content.", parent=self.window)
-            return
-        
-        success, message, note_id = self.db.add_support_note(self.ap_id, self.current_user, headline, note)
-        if success:
-            self._clear_note_form()
-            self._refresh_notes()
-            messagebox.showinfo("Note Saved", "Support note added successfully.", parent=self.window)
+        if selected_ap:
+            # Open new support window (will check if already open)
+            APSupportWindow(self.window, selected_ap, self.current_user, 
+                          self.db, self.browser_helper)
+    
+    def _open_note_window(self, note):
+        """Open or update the note detail window."""
+        # Check if window exists and has unsaved changes
+        if self.note_window and self.note_window.winfo_exists():
+            if self.note_window_modified:
+                response = messagebox.askyesnocancel(
+                    "Unsaved Changes",
+                    "You have unsaved changes. Do you want to save them?",
+                    parent=self.note_window
+                )
+                if response is None:  # Cancel
+                    return
+                elif response:  # Yes, save
+                    self._save_note_from_window()
+            
+            # Update existing window with new note
+            self._update_note_window(note)
         else:
-            messagebox.showerror("Error", f"Failed to save note: {message}", parent=self.window)
+            # Create new note window
+            self._create_note_window(note)
     
-    def _clear_note_form(self):
-        """Clear the new note form."""
-        self.headline_var.set("")
-        self.note_text.delete("1.0", tk.END)
-    
-    def _on_note_select(self, event=None):
-        """Handle note selection from list."""
-        if self.editing_note:
-            return  # Don't allow selection change while editing
+    def _create_note_window(self, note):
+        """Create a new note detail/edit window."""
+        self.note_window = tk.Toplevel(self.window)
+        self.note_window.title(f"Note - {note['headline']}")
+        self.note_window.geometry("600x500")
+        self.note_window_modified = False
         
-        selection = self.notes_listbox.curselection()
-        if not selection:
-            return
+        # Store current note ID
+        self.current_note_id = note['id']
         
-        idx = selection[0]
-        note = self.notes_data[idx]
-        self.selected_note_id = note['id']
+        # Header with note info
+        header = tk.Frame(self.note_window, bg="#f8f9fa", relief="solid", borderwidth=1)
+        header.pack(fill="x", padx=10, pady=10)
         
-        # Display note details
-        self.note_detail_text.config(state="normal")
-        self.note_detail_text.delete("1.0", tk.END)
-        
-        detail = f"Date: {note['created_at']}\n"
-        detail += f"User: {note['user']}\n"
-        detail += f"Headline: {note['headline']}\n"
-        detail += f"\n{note['note']}"
+        tk.Label(header, text=f"Created: {note['created_at']}", 
+                font=("Arial", 9), bg="#f8f9fa").pack(anchor="w", padx=10, pady=2)
+        tk.Label(header, text=f"By: {note['user']}", 
+                font=("Arial", 9), bg="#f8f9fa").pack(anchor="w", padx=10, pady=2)
         
         if note.get('updated_at') and note['updated_at'] != note['created_at']:
-            detail += f"\n\n(Edited: {note['updated_at']} by {note.get('updated_by', 'unknown')})"
+            tk.Label(header, text=f"Last edited: {note['updated_at']} by {note.get('updated_by', 'unknown')}", 
+                    font=("Arial", 8, "italic"), fg="gray", bg="#f8f9fa").pack(anchor="w", padx=10, pady=2)
         
-        self.note_detail_text.insert("1.0", detail)
-        self.note_detail_text.config(state="disabled")
+        # Headline
+        headline_frame = tk.Frame(self.note_window)
+        headline_frame.pack(fill="x", padx=10, pady=(0, 10))
         
-        # Enable edit/delete only for latest note
+        tk.Label(headline_frame, text="Headline:", font=("Arial", 9, "bold")).pack(anchor="w")
+        self.note_window_headline = tk.Entry(headline_frame, font=("Arial", 10))
+        self.note_window_headline.pack(fill="x")
+        self.note_window_headline.insert(0, note['headline'])
+        
+        # Check if this is the user's note and latest
         is_latest = self.db.is_latest_note(note['id'], self.ap_id)
-        if is_latest:
-            self.edit_note_btn.config(state="normal")
-            self.delete_note_btn.config(state="normal")
+        is_owner = note['user'] == self.current_user
+        can_edit = is_latest and is_owner
+        
+        if not can_edit:
+            self.note_window_headline.config(state="readonly")
+        
+        # Note content
+        content_frame = tk.Frame(self.note_window)
+        content_frame.pack(fill="both", expand=True, padx=10)
+        
+        tk.Label(content_frame, text="Note:", font=("Arial", 9, "bold")).pack(anchor="w")
+        self.note_window_text = scrolledtext.ScrolledText(content_frame, font=("Arial", 10), 
+                                                          wrap=tk.WORD, height=15)
+        self.note_window_text.pack(fill="both", expand=True)
+        self.note_window_text.insert("1.0", note['note'])
+        
+        if not can_edit:
+            self.note_window_text.config(state="disabled")
         else:
-            self.edit_note_btn.config(state="disabled")
-            self.delete_note_btn.config(state="disabled")
+            # Track modifications
+            def on_modify(event=None):
+                self.note_window_modified = True
+            self.note_window_text.bind("<<Modified>>", on_modify)
+            self.note_window_headline.bind("<KeyRelease>", on_modify)
+        
+        # Reply section
+        reply_frame = tk.LabelFrame(self.note_window, text="Add Reply", padx=10, pady=10)
+        reply_frame.pack(fill="x", padx=10, pady=(10, 0))
+        
+        tk.Label(reply_frame, text="Reply:").pack(anchor="w")
+        self.note_window_reply = scrolledtext.ScrolledText(reply_frame, height=4, 
+                                                           font=("Arial", 10), wrap=tk.WORD)
+        self.note_window_reply.pack(fill="x")
+        
+        # Buttons
+        btn_frame = tk.Frame(self.note_window)
+        btn_frame.pack(fill="x", padx=10, pady=10)
+        
+        if can_edit:
+            tk.Button(btn_frame, text="Save Changes", command=self._save_note_from_window,
+                     bg="#28A745", fg="white", padx=20, pady=8, relief="flat",
+                     cursor="hand2").pack(side="left", padx=5)
+            
+            tk.Button(btn_frame, text="Delete Note", command=self._delete_note_from_window,
+                     bg="#DC3545", fg="white", padx=20, pady=8, relief="flat",
+                     cursor="hand2").pack(side="left", padx=5)
+        
+        tk.Button(btn_frame, text="Add Reply", command=self._add_reply_from_window,
+                 bg="#007BFF", fg="white", padx=20, pady=8, relief="flat",
+                 cursor="hand2").pack(side="left", padx=5)
+        
+        tk.Button(btn_frame, text="Close", command=self._close_note_window,
+                 bg="#6C757D", fg="white", padx=20, pady=8, relief="flat",
+                 cursor="hand2").pack(side="right", padx=5)
     
-    def _edit_selected_note(self):
-        """Enter edit mode for selected note."""
-        if not self.selected_note_id:
-            return
+    def _update_note_window(self, note):
+        """Update the existing note window with different note."""
+        self.current_note_id = note['id']
+        self.note_window_modified = False
         
-        note = next((n for n in self.notes_data if n['id'] == self.selected_note_id), None)
-        if not note:
-            return
+        # Update title
+        self.note_window.title(f"Note - {note['headline']}")
         
-        self.editing_note = True
+        # Update headline
+        self.note_window_headline.config(state="normal")
+        self.note_window_headline.delete(0, tk.END)
+        self.note_window_headline.insert(0, note['headline'])
         
-        # Enable text area and populate with editable content
-        self.note_detail_text.config(state="normal")
-        self.note_detail_text.delete("1.0", tk.END)
-        self.note_detail_text.insert("1.0", note['note'])
+        # Update note content
+        self.note_window_text.config(state="normal")
+        self.note_window_text.delete("1.0", tk.END)
+        self.note_window_text.insert("1.0", note['note'])
         
-        # Update button states
-        self.edit_note_btn.config(state="disabled")
-        self.delete_note_btn.config(state="disabled")
-        self.save_edit_btn.config(state="normal")
-        self.cancel_edit_btn.config(state="normal")
-        self.notes_listbox.config(state="disabled")
+        # Check permissions
+        is_latest = self.db.is_latest_note(note['id'], self.ap_id)
+        is_owner = note['user'] == self.current_user
+        can_edit = is_latest and is_owner
+        
+        if not can_edit:
+            self.note_window_headline.config(state="readonly")
+            self.note_window_text.config(state="disabled")
+        
+        # Clear reply
+        self.note_window_reply.delete("1.0", tk.END)
     
-    def _save_note_edit(self):
-        """Save edited note."""
-        if not self.selected_note_id:
+    def _save_note_from_window(self):
+        """Save note edits from the note window."""
+        headline = self.note_window_headline.get().strip()
+        content = self.note_window_text.get("1.0", tk.END).strip()
+        
+        if not headline or not content:
+            messagebox.showwarning("Missing Data", "Headline and note content are required.", 
+                                 parent=self.note_window)
             return
         
-        edited_text = self.note_detail_text.get("1.0", tk.END).strip()
-        note = next((n for n in self.notes_data if n['id'] == self.selected_note_id), None)
-        
-        if not note:
-            return
-        
-        success, message = self.db.update_support_note(self.selected_note_id, note['headline'], 
-                                                       edited_text, self.current_user)
+        success, message = self.db.update_support_note(self.current_note_id, headline, 
+                                                       content, self.current_user)
         if success:
-            self.editing_note = False
+            self.note_window_modified = False
             self._refresh_notes()
-            self.note_detail_text.config(state="disabled")
-            self.save_edit_btn.config(state="disabled")
-            self.cancel_edit_btn.config(state="disabled")
-            self.notes_listbox.config(state="normal")
-            messagebox.showinfo("Note Updated", "Note updated successfully.", parent=self.window)
+            messagebox.showinfo("Saved", "Note updated successfully.", parent=self.note_window)
         else:
-            messagebox.showerror("Error", f"Failed to update note: {message}", parent=self.window)
+            messagebox.showerror("Error", f"Failed to save: {message}", parent=self.note_window)
     
-    def _cancel_note_edit(self):
-        """Cancel note editing."""
-        self.editing_note = False
-        self.note_detail_text.config(state="disabled")
-        self.save_edit_btn.config(state="disabled")
-        self.cancel_edit_btn.config(state="disabled")
-        self.notes_listbox.config(state="normal")
-        
-        # Reload the note detail
-        self._on_note_select()
-    
-    def _delete_selected_note(self):
-        """Delete the selected note."""
-        if not self.selected_note_id:
-            return
-        
+    def _delete_note_from_window(self):
+        """Delete note from the note window."""
         response = messagebox.askyesno("Confirm Delete", 
                                       "Are you sure you want to delete this note?",
-                                      parent=self.window)
+                                      parent=self.note_window)
         if not response:
             return
         
-        success, message = self.db.delete_support_note(self.selected_note_id, self.current_user)
+        success, message = self.db.delete_support_note(self.current_note_id, self.current_user)
         if success:
-            self.selected_note_id = None
             self._refresh_notes()
-            self.note_detail_text.config(state="normal")
-            self.note_detail_text.delete("1.0", tk.END)
-            self.note_detail_text.config(state="disabled")
-            self.edit_note_btn.config(state="disabled")
-            self.delete_note_btn.config(state="disabled")
-            messagebox.showinfo("Note Deleted", "Note deleted successfully.", parent=self.window)
+            self.note_window.destroy()
+            self.note_window = None
+            messagebox.showinfo("Deleted", "Note deleted successfully.", parent=self.window)
         else:
-            messagebox.showerror("Error", f"Failed to delete note: {message}", parent=self.window)
+            messagebox.showerror("Error", f"Failed to delete: {message}", parent=self.note_window)
+    
+    def _add_reply_from_window(self):
+        """Add a reply to the current note."""
+        reply_text = self.note_window_reply.get("1.0", tk.END).strip()
+        
+        if not reply_text:
+            messagebox.showwarning("Empty Reply", "Please enter reply text.", 
+                                 parent=self.note_window)
+            return
+        
+        # Get original note to create reply headline
+        note = next((n for n in self.notes_data if n['id'] == self.current_note_id), None)
+        if not note:
+            return
+        
+        headline = f"Re: {note['headline']}"
+        
+        success, message, note_id = self.db.add_support_note(self.ap_id, self.current_user, 
+                                                             headline, reply_text)
+        if success:
+            self._refresh_notes()
+            self.note_window_reply.delete("1.0", tk.END)
+            messagebox.showinfo("Reply Added", "Reply added successfully.", parent=self.note_window)
+        else:
+            messagebox.showerror("Error", f"Failed to add reply: {message}", parent=self.note_window)
+    
+    def _close_note_window(self):
+        """Close the note window with unsaved changes check."""
+        if self.note_window_modified:
+            response = messagebox.askyesnocancel(
+                "Unsaved Changes",
+                "You have unsaved changes. Do you want to save them?",
+                parent=self.note_window
+            )
+            if response is None:  # Cancel
+                return
+            elif response:  # Yes, save
+                self._save_note_from_window()
+        
+        self.note_window.destroy()
+        self.note_window = None
     
     def _on_close(self):
         """Handle window close."""
