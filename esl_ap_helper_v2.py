@@ -131,21 +131,28 @@ class WebAutomationWorker:
             return match.group(1).strip()
         return None
     
-    def handle_cato_warning(self):
+    def handle_cato_warning(self, driver=None):
         """Check for and handle Cato Networks warning page.
         Returns True if warning was detected and handled, False otherwise.
         """
         try:
-            if not self.driver:
+            # Use provided driver or fall back to self.driver
+            active_driver = driver if driver else self.driver
+            if not active_driver:
                 return False
                 
-            page_source = self.driver.page_source
+            page_source = active_driver.page_source
             
             # Check if Cato Networks warning page is present
-            if ('Warning - Restricted Website' in page_source or 
-                'Invalid SSL/TLS certificate - IP address mismatch' in page_source):
+            has_warning = 'Warning - Restricted Website' in page_source
+            has_ssl_error = 'Invalid SSL/TLS certificate - IP address mismatch' in page_source
+            has_proceed_button = 'class="proceed prompt"' in page_source
+            
+            self.log(f"[Cato Check] Warning text: {has_warning}, SSL error: {has_ssl_error}, Proceed button: {has_proceed_button}")
+            
+            if (has_warning or has_ssl_error) and has_proceed_button:
                 
-                self.log("Cato Networks warning detected, clicking PROCEED button...")
+                self.log("🚨 Cato Networks warning detected, clicking PROCEED button...")
                 
                 # Find and click the PROCEED button
                 from selenium.webdriver.common.by import By
@@ -167,12 +174,12 @@ class WebAutomationWorker:
                         try:
                             if selector.startswith("//"):
                                 # XPath selector
-                                proceed_btn = WebDriverWait(self.driver, 3).until(
+                                proceed_btn = WebDriverWait(active_driver, 3).until(
                                     EC.element_to_be_clickable((By.XPATH, selector))
                                 )
                             else:
                                 # CSS selector
-                                proceed_btn = WebDriverWait(self.driver, 3).until(
+                                proceed_btn = WebDriverWait(active_driver, 3).until(
                                     EC.element_to_be_clickable((By.CSS_SELECTOR, selector))
                                 )
                             self.log(f"✓ Found PROCEED button with selector: {selector}")
@@ -184,15 +191,24 @@ class WebAutomationWorker:
                         self.log("✗ Could not find PROCEED button with any selector")
                         return False
                     
-                    # Click the button
-                    proceed_btn.click()
-                    self.log("✓ Clicked PROCEED button")
+                    # Try regular click first, then JavaScript click as fallback
+                    try:
+                        proceed_btn.click()
+                        self.log("✓ Clicked PROCEED button (regular click)")
+                    except Exception as click_err:
+                        self.log(f"Regular click failed, trying JavaScript click: {str(click_err)}")
+                        try:
+                            active_driver.execute_script("arguments[0].click();", proceed_btn)
+                            self.log("✓ Clicked PROCEED button (JavaScript click)")
+                        except Exception as js_err:
+                            self.log(f"✗ JavaScript click also failed: {str(js_err)}")
+                            return False
                     
                     # Wait longer for page to process the click
                     time.sleep(3)
                     
                     # Refresh the page
-                    self.driver.refresh()
+                    active_driver.refresh()
                     self.log("✓ Page refreshed after Cato warning")
                     
                     # Wait for page to fully reload
@@ -200,7 +216,7 @@ class WebAutomationWorker:
                     
                     # Wait for body element to be present (ensures page loaded)
                     try:
-                        WebDriverWait(self.driver, 10).until(
+                        WebDriverWait(active_driver, 10).until(
                             EC.presence_of_element_located((By.TAG_NAME, "body"))
                         )
                         self.log("✓ Page fully reloaded")

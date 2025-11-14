@@ -84,7 +84,18 @@ class BrowserManager:
             if not is_reconnect:
                 self.ap_tabs = []
             
-            # Initialize browser if not already open
+            # Check if browser is still valid (not closed)
+            browser_valid = False
+            if self.driver:
+                try:
+                    # Try to get current window handle to check if session is valid
+                    _ = self.driver.current_window_handle
+                    browser_valid = True
+                except:
+                    self.log("Browser session is invalid (browser was closed), reinitializing...")
+                    self.driver = None
+            
+            # Initialize browser if not already open or if session is invalid
             if not self.driver:
                 self.progress("Initializing browser...", 5)
                 self.initialize_browser()
@@ -206,10 +217,14 @@ class BrowserManager:
                     # Give page more time to load before checking for Cato
                     time.sleep(3)
                     
-                    if self.handle_cato_callback and self.handle_cato_callback():
-                        self.log(f"✓ Handled Cato warning for {ap_id}")
-                        # Give extra time after Cato handling
-                        time.sleep(2)
+                    if self.handle_cato_callback:
+                        cato_detected = self.handle_cato_callback(self.driver)
+                        if cato_detected:
+                            self.log(f"✓ Cato warning detected and handled for {ap_id}")
+                            # Give extra time after Cato handling
+                            time.sleep(2)
+                        else:
+                            self.log(f"  No Cato warning detected for {ap_id}")
                     
                 except Exception as e:
                     self.log(f"Error checking Cato warning for {ap_id}: {str(e)}")

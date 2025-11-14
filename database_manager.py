@@ -233,6 +233,19 @@ class DatabaseManager:
                 )
             ''')
             
+            # Support Note Replies table
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS support_note_replies (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    note_id INTEGER NOT NULL,
+                    user TEXT NOT NULL,
+                    reply_text TEXT NOT NULL,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    is_deleted BOOLEAN DEFAULT 0,
+                    FOREIGN KEY (note_id) REFERENCES support_notes(id) ON DELETE CASCADE
+                )
+            ''')
+            
             # Add support_status column to access_points if it doesn't exist
             try:
                 cursor.execute('ALTER TABLE access_points ADD COLUMN support_status TEXT DEFAULT "active"')
@@ -1010,6 +1023,44 @@ class DatabaseManager:
             ''', (ap_id,))
             row = cursor.fetchone()
             return row and row['id'] == note_id if row else False
+    
+    def add_note_reply(self, note_id: int, user: str, reply_text: str) -> Tuple[bool, str, int]:
+        """Add a reply to a support note."""
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute('''
+                    INSERT INTO support_note_replies (note_id, user, reply_text)
+                    VALUES (?, ?, ?)
+                ''', (note_id, user, reply_text))
+                conn.commit()
+                return True, "Reply added successfully", cursor.lastrowid
+        except Exception as e:
+            return False, f"Error adding reply: {str(e)}", 0
+    
+    def get_note_replies(self, note_id: int) -> List[Dict]:
+        """Get all replies for a note, ordered by newest first."""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute('''
+                SELECT id, note_id, user, reply_text, created_at
+                FROM support_note_replies
+                WHERE note_id = ? AND is_deleted = 0
+                ORDER BY created_at DESC
+            ''', (note_id,))
+            return [dict(row) for row in cursor.fetchall()]
+    
+    def get_note_reply_count(self, note_id: int) -> int:
+        """Get the count of replies for a note."""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute('''
+                SELECT COUNT(*) as count
+                FROM support_note_replies
+                WHERE note_id = ? AND is_deleted = 0
+            ''', (note_id,))
+            row = cursor.fetchone()
+            return row['count'] if row else 0
     
     def update_support_status(self, ap_id: str, status: str) -> Tuple[bool, str]:
         """Update the support status of an AP.

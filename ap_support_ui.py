@@ -244,7 +244,7 @@ class APSupportWindow:
         
         self.window = tk.Toplevel(parent)
         self.window.title(f"AP Support - {ap_id}")
-        self.window.geometry("900x700")
+        self.window.geometry("1100x700")
         
         self.ap = ap
         self.ap_id = ap_id
@@ -263,9 +263,9 @@ class APSupportWindow:
         
         # Center window
         self.window.update_idletasks()
-        x = (self.window.winfo_screenwidth() // 2) - (900 // 2)
+        x = (self.window.winfo_screenwidth() // 2) - (1100 // 2)
         y = (self.window.winfo_screenheight() // 2) - (700 // 2)
-        self.window.geometry(f"900x700+{x}+{y}")
+        self.window.geometry(f"1100x700+{x}+{y}")
     
     def _create_ui(self):
         """Create the support window UI with modern layout matching main window."""
@@ -282,7 +282,7 @@ class APSupportWindow:
         # Configure ttk styles to match main window
         style.configure("APSupport.TFrame", background=frame_bg)
         style.configure("APSupport.TLabelframe", background=frame_bg, borderwidth=1, 
-                       relief="solid", bordercolor="#666666")
+                       relief="solid", bordercolor="#CCCCCC")
         style.configure("APSupport.TLabelframe.Label", background=frame_bg, foreground="#333333", 
                        font=("Segoe UI", 11, "bold"))
         
@@ -295,7 +295,7 @@ class APSupportWindow:
         left_column.pack(side="left", fill="both", expand=True, padx=(0, 10))
         
         # RIGHT COLUMN
-        right_column = ttk.Frame(main_container, style="APSupport.TFrame", width=350)
+        right_column = ttk.Frame(main_container, style="APSupport.TFrame", width=400)
         right_column.pack(side="right", fill="both", padx=(10, 0))
         right_column.pack_propagate(False)
         
@@ -370,16 +370,24 @@ class APSupportWindow:
         web_control_frame = tk.Frame(web_frame, bg=frame_bg)
         web_control_frame.pack(fill="x")
         
-        self.web_action_var = tk.StringVar(value="Open Web UI")
+        self.web_action_var = tk.StringVar(value="Choose action")
         self.web_action_combo = ttk.Combobox(web_control_frame, textvariable=self.web_action_var,
-                                             state="readonly", width=25, font=("Segoe UI", 9))
-        self.web_action_combo['values'] = ("Open Web UI",)
-        self.web_action_combo.pack(side="left", fill="x", expand=True, padx=(0, 5))
+                                             state="readonly", width=25, font=("Segoe UI", 10), height=12)
+        self.web_action_combo['values'] = (
+            "Choose action",
+            "Open Web UI",
+            "Navigate to Status",
+            "Work with Provisioning",
+            "Work with SSH",
+            "Do a Software Update"
+        )
+        self.web_action_combo.pack(side="left", fill="x", expand=True, padx=(0, 5), ipady=4)
+        self.web_action_combo.bind("<<ComboboxSelected>>", self._on_web_action_change)
         
         self.web_run_btn = tk.Button(web_control_frame, text="Run", command=self._run_web_action,
-                                     bg="#007BFF", fg="white", cursor="hand2", padx=20, pady=8,
-                                     font=("Segoe UI", 9, "bold"), relief="flat", bd=0,
-                                     activebackground="#0056b3")
+                                     bg="#007BFF", fg="white", cursor="hand2", padx=20, pady=10,
+                                     font=("Segoe UI", 10, "bold"), relief="flat", bd=0,
+                                     state="disabled", activebackground="#0056b3")
         self.web_run_btn.pack(side="left")
         
         # Track browser state
@@ -393,15 +401,19 @@ class APSupportWindow:
         ssh_control_frame = tk.Frame(ssh_frame, bg=frame_bg)
         ssh_control_frame.pack(fill="x")
         
-        self.ssh_action_var = tk.StringVar(value="SSH Connection")
+        self.ssh_action_var = tk.StringVar(value="Choose action")
         self.ssh_action_combo = ttk.Combobox(ssh_control_frame, textvariable=self.ssh_action_var,
-                                            state="disabled", width=25, font=("Segoe UI", 9))
-        self.ssh_action_combo['values'] = ("SSH Connection",)
-        self.ssh_action_combo.pack(side="left", fill="x", expand=True, padx=(0, 5))
+                                            state="disabled", width=25, font=("Segoe UI", 10), height=12)
+        self.ssh_action_combo['values'] = (
+            "Choose action",
+            "SSH Connection"
+        )
+        self.ssh_action_combo.pack(side="left", fill="x", expand=True, padx=(0, 5), ipady=4)
+        self.ssh_action_combo.bind("<<ComboboxSelected>>", self._on_ssh_action_change)
         
         self.ssh_run_btn = tk.Button(ssh_control_frame, text="Run", command=self._run_ssh_action,
-                                     bg="#6C757D", fg="white", cursor="hand2", padx=20, pady=8,
-                                     font=("Segoe UI", 9, "bold"), relief="flat", bd=0,
+                                     bg="#6C757D", fg="white", cursor="hand2", padx=20, pady=10,
+                                     font=("Segoe UI", 10, "bold"), relief="flat", bd=0,
                                      state="disabled", activebackground="#5A6268")
         self.ssh_run_btn.pack(side="left")
         
@@ -422,6 +434,12 @@ class APSupportWindow:
         notes_frame = ttk.LabelFrame(right_column, text="Notes", padding=10, 
                                      style="APSupport.TLabelframe")
         notes_frame.pack(fill="both", expand=True, pady=(0, 10))
+        
+        # Write Note button
+        tk.Button(notes_frame, text="Write Note", command=self._open_write_note_dialog,
+                 bg="#28A745", fg="white", cursor="hand2", padx=20, pady=8,
+                 font=("Segoe UI", 9, "bold"), relief="flat", bd=0,
+                 activebackground="#218838").pack(fill="x", pady=(0, 10))
         
         # Notes list with scrollbar (2-row format: date/user, then headline)
         notes_canvas = tk.Canvas(notes_frame, bg=frame_bg, highlightthickness=0)
@@ -532,12 +550,20 @@ class APSupportWindow:
             note_frame = tk.Frame(self.notes_container, bg="#FFFFFF", relief="solid", 
                                  borderwidth=1, cursor="hand2", highlightbackground="#E0E0E0",
                                  highlightthickness=1)
-            note_frame.pack(fill="x", pady=3, padx=3)
+            note_frame.pack(fill="both", expand=True, pady=3, padx=0)
             
-            # Row 1: Date/Time and User
-            row1 = tk.Label(note_frame, text=f"{note['created_at']} - {note['user']}", 
-                          font=("Segoe UI", 8), fg="#888888", bg="#FFFFFF", anchor="w")
-            row1.pack(fill="x", padx=8, pady=(5, 0))
+            # Row 1: Date/Time, User, and Reply count
+            row1_frame = tk.Frame(note_frame, bg="#FFFFFF")
+            row1_frame.pack(fill="x", padx=8, pady=(5, 0))
+            
+            tk.Label(row1_frame, text=f"{note['created_at']} - {note['user']}", 
+                    font=("Segoe UI", 8), fg="#888888", bg="#FFFFFF", anchor="w").pack(side="left")
+            
+            # Get reply count
+            reply_count = self.db.get_note_reply_count(note['id'])
+            if reply_count > 0:
+                tk.Label(row1_frame, text=f"💬 {reply_count}", 
+                        font=("Segoe UI", 8), fg="#007BFF", bg="#FFFFFF", anchor="e").pack(side="right", padx=5)
             
             # Row 2: Headline
             row2 = tk.Label(note_frame, text=note['headline'], 
@@ -545,8 +571,10 @@ class APSupportWindow:
             row2.pack(fill="x", padx=8, pady=(0, 5))
             
             # Bind click events
-            for widget in [note_frame, row1, row2]:
+            for widget in [note_frame, row1_frame, row2]:
                 widget.bind("<Button-1>", lambda e, n=note: self._open_note_window(n))
+                for child in widget.winfo_children():
+                    child.bind("<Button-1>", lambda e, n=note: self._open_note_window(n))
             
             self.note_widgets.append(note_frame)
     
@@ -558,6 +586,20 @@ class APSupportWindow:
             messagebox.showinfo("Status Updated", f"Support status changed to: {new_status}", parent=self.window)
         else:
             messagebox.showerror("Error", f"Failed to update status: {message}", parent=self.window)
+    
+    def _on_web_action_change(self, event=None):
+        """Enable/disable Run button based on web action selection."""
+        if self.web_action_var.get() == "Choose action":
+            self.web_run_btn.config(state="disabled")
+        else:
+            self.web_run_btn.config(state="normal")
+    
+    def _on_ssh_action_change(self, event=None):
+        """Enable/disable Run button based on SSH action selection."""
+        if self.ssh_action_var.get() == "Choose action":
+            self.ssh_run_btn.config(state="disabled")
+        else:
+            self.ssh_run_btn.config(state="normal")
     
     def _log_activity(self, message):
         """Add message to activity log."""
@@ -594,14 +636,8 @@ class APSupportWindow:
     def _enable_web_actions(self):
         """Enable additional web actions after successful browser connection."""
         self.browser_connected = True
-        self.web_action_combo['values'] = (
-            "Open Web UI",
-            "Navigate to Status",
-            "Work with Provisioning",
-            "Work with SSH",
-            "Do a Software Update"
-        )
-        self._log_activity("✓ Browser connected - additional actions available")
+        # Note: All actions are now visible from the start, we just manage button state
+        self._log_activity("✓ Browser connected - all actions available")
     
     def _navigate_to_status(self):
         """Navigate to status page."""
@@ -679,6 +715,82 @@ class APSupportWindow:
             APSupportWindow(self.window, selected_ap, self.current_user, 
                           self.db, self.browser_helper)
     
+    def _open_write_note_dialog(self):
+        """Open a dialog to write a new note."""
+        dialog = tk.Toplevel(self.window)
+        dialog.title("Write Note")
+        dialog.geometry("600x500")
+        dialog.configure(bg="#F5F5F5")
+        dialog.transient(self.window)
+        dialog.grab_set()
+        
+        # Center dialog
+        dialog.update_idletasks()
+        x = (dialog.winfo_screenwidth() // 2) - (600 // 2)
+        y = (dialog.winfo_screenheight() // 2) - (500 // 2)
+        dialog.geometry(f"600x500+{x}+{y}")
+        
+        # Main frame
+        main_frame = tk.Frame(dialog, bg="#FFFFFF", padx=20, pady=20)
+        main_frame.pack(fill="both", expand=True, padx=10, pady=10)
+        
+        # Headline
+        tk.Label(main_frame, text="Headline:", font=("Segoe UI", 10, "bold"), 
+                bg="#FFFFFF", fg="#333333").pack(anchor="w", pady=(0, 5))
+        headline_entry = tk.Entry(main_frame, font=("Segoe UI", 10), bd=1, relief="solid")
+        headline_entry.pack(fill="x", pady=(0, 15))
+        headline_entry.focus_set()
+        
+        # Note content
+        tk.Label(main_frame, text="Note Content:", font=("Segoe UI", 10, "bold"), 
+                bg="#FFFFFF", fg="#333333").pack(anchor="w", pady=(0, 5))
+        
+        text_frame = tk.Frame(main_frame, bg="#FFFFFF")
+        text_frame.pack(fill="both", expand=True, pady=(0, 15))
+        
+        text_widget = tk.Text(text_frame, font=("Segoe UI", 10), wrap="word", bd=1, 
+                             relief="solid", padx=5, pady=5)
+        text_widget.pack(side="left", fill="both", expand=True)
+        
+        scrollbar = tk.Scrollbar(text_frame, command=text_widget.yview)
+        scrollbar.pack(side="right", fill="y")
+        text_widget.config(yscrollcommand=scrollbar.set)
+        
+        # Button frame
+        button_frame = tk.Frame(main_frame, bg="#FFFFFF")
+        button_frame.pack(fill="x")
+        
+        def save_note():
+            headline = headline_entry.get().strip()
+            content = text_widget.get("1.0", tk.END).strip()
+            
+            if not headline or not content:
+                messagebox.showwarning("Missing Data", "Both headline and content are required.", 
+                                     parent=dialog)
+                return
+            
+            success, message, note_id = self.db.add_support_note(self.ap_id, self.current_user, 
+                                                                 headline, content)
+            if success:
+                self._refresh_notes()
+                self._log_activity(f"✓ Note added: {headline}")
+                messagebox.showinfo("Success", "Note saved successfully.", parent=dialog)
+                dialog.destroy()
+            else:
+                messagebox.showerror("Error", f"Failed to save note: {message}", parent=dialog)
+        
+        # Save button
+        tk.Button(button_frame, text="Save Note", command=save_note,
+                 bg="#28A745", fg="white", cursor="hand2", padx=30, pady=10,
+                 font=("Segoe UI", 10, "bold"), relief="flat", bd=0,
+                 activebackground="#218838").pack(side="left", padx=(0, 10))
+        
+        # Cancel button
+        tk.Button(button_frame, text="Cancel", command=dialog.destroy,
+                 bg="#6C757D", fg="white", cursor="hand2", padx=30, pady=10,
+                 font=("Segoe UI", 10, "bold"), relief="flat", bd=0,
+                 activebackground="#5A6268").pack(side="left")
+    
     def _open_note_window(self, note):
         """Open or update the note detail window."""
         # Check if window exists and has unsaved changes
@@ -704,7 +816,7 @@ class APSupportWindow:
         """Create a new note detail/edit window."""
         self.note_window = tk.Toplevel(self.window)
         self.note_window.title(f"Note - {note['headline']}")
-        self.note_window.geometry("650x550")
+        self.note_window.geometry("700x700")
         self.note_window.configure(bg="#FFFFFF")
         self.note_window_modified = False
         
@@ -764,13 +876,49 @@ class APSupportWindow:
             self.note_window_text.bind("<<Modified>>", on_modify)
             self.note_window_headline.bind("<KeyRelease>", on_modify)
         
-        # Reply section
-        reply_frame = tk.LabelFrame(self.note_window, text="Add Reply", padx=15, pady=10,
-                                    bg="#FFFFFF", font=("Segoe UI", 10, "bold"))
-        reply_frame.pack(fill="x", padx=15, pady=(10, 0))
+        # Existing Replies section
+        replies = self.db.get_note_replies(note['id'])
+        if replies:
+            replies_frame = tk.LabelFrame(self.note_window, text=f"Replies ({len(replies)})", 
+                                         padx=10, pady=10, bg="#FFFFFF", 
+                                         font=("Segoe UI", 10, "bold"))
+            replies_frame.pack(fill="both", expand=True, padx=15, pady=(10, 0))
+            
+            # Create scrollable frame for replies
+            replies_canvas = tk.Canvas(replies_frame, bg="#F8F9FA", highlightthickness=0, height=150)
+            replies_scroll = ttk.Scrollbar(replies_frame, orient="vertical", command=replies_canvas.yview)
+            replies_container = tk.Frame(replies_canvas, bg="#F8F9FA")
+            
+            replies_container.bind(
+                "<Configure>",
+                lambda e: replies_canvas.configure(scrollregion=replies_canvas.bbox("all"))
+            )
+            
+            replies_canvas.create_window((0, 0), window=replies_container, anchor="nw")
+            replies_canvas.configure(yscrollcommand=replies_scroll.set)
+            
+            replies_canvas.pack(side="left", fill="both", expand=True)
+            replies_scroll.pack(side="right", fill="y")
+            
+            # Display replies (newest first)
+            for reply in replies:
+                reply_box = tk.Frame(replies_container, bg="#FFFFFF", relief="solid", 
+                                    borderwidth=1, padx=10, pady=8)
+                reply_box.pack(fill="x", pady=5, padx=5)
+                
+                tk.Label(reply_box, text=f"{reply['created_at']} - {reply['user']}", 
+                        font=("Segoe UI", 8), fg="#888888", bg="#FFFFFF", anchor="w").pack(anchor="w")
+                tk.Label(reply_box, text=reply['reply_text'], 
+                        font=("Segoe UI", 9), bg="#FFFFFF", anchor="w", justify="left",
+                        wraplength=550).pack(anchor="w", pady=(5, 0))
         
-        tk.Label(reply_frame, text="Reply:", bg="#FFFFFF", font=("Segoe UI", 9)).pack(anchor="w", pady=(0, 5))
-        self.note_window_reply = scrolledtext.ScrolledText(reply_frame, height=4, 
+        # Add Reply section
+        add_reply_frame = tk.LabelFrame(self.note_window, text="Add Reply", padx=15, pady=10,
+                                       bg="#FFFFFF", font=("Segoe UI", 10, "bold"))
+        add_reply_frame.pack(fill="x", padx=15, pady=(10, 0))
+        
+        tk.Label(add_reply_frame, text="Reply:", bg="#FFFFFF", font=("Segoe UI", 9)).pack(anchor="w", pady=(0, 5))
+        self.note_window_reply = scrolledtext.ScrolledText(add_reply_frame, height=4, 
                                                            font=("Segoe UI", 10), wrap=tk.WORD,
                                                            relief="solid", borderwidth=1)
         self.note_window_reply.pack(fill="x")
@@ -801,34 +949,11 @@ class APSupportWindow:
                  activebackground="#5A6268").pack(side="right", padx=5)
     
     def _update_note_window(self, note):
-        """Update the existing note window with different note."""
-        self.current_note_id = note['id']
-        self.note_window_modified = False
-        
-        # Update title
-        self.note_window.title(f"Note - {note['headline']}")
-        
-        # Update headline
-        self.note_window_headline.config(state="normal")
-        self.note_window_headline.delete(0, tk.END)
-        self.note_window_headline.insert(0, note['headline'])
-        
-        # Update note content
-        self.note_window_text.config(state="normal")
-        self.note_window_text.delete("1.0", tk.END)
-        self.note_window_text.insert("1.0", note['note'])
-        
-        # Check permissions
-        is_latest = self.db.is_latest_note(note['id'], self.ap_id)
-        is_owner = note['user'] == self.current_user
-        can_edit = is_latest and is_owner
-        
-        if not can_edit:
-            self.note_window_headline.config(state="readonly")
-            self.note_window_text.config(state="disabled")
-        
-        # Clear reply
-        self.note_window_reply.delete("1.0", tk.END)
+        """Update the existing note window with different note - recreate to show replies."""
+        # Destroy existing window and create new one with updated note
+        self.note_window.destroy()
+        self.note_window = None
+        self._create_note_window(note)
     
     def _save_note_from_window(self):
         """Save note edits from the note window."""
@@ -875,18 +1000,15 @@ class APSupportWindow:
                                  parent=self.note_window)
             return
         
-        # Get original note to create reply headline
-        note = next((n for n in self.notes_data if n['id'] == self.current_note_id), None)
-        if not note:
-            return
-        
-        headline = f"Re: {note['headline']}"
-        
-        success, message, note_id = self.db.add_support_note(self.ap_id, self.current_user, 
-                                                             headline, reply_text)
+        success, message, reply_id = self.db.add_note_reply(self.current_note_id, 
+                                                            self.current_user, reply_text)
         if success:
             self._refresh_notes()
             self.note_window_reply.delete("1.0", tk.END)
+            # Refresh the note window to show the new reply
+            note = next((n for n in self.notes_data if n['id'] == self.current_note_id), None)
+            if note:
+                self._update_note_window(note)
             messagebox.showinfo("Reply Added", "Reply added successfully.", parent=self.note_window)
         else:
             messagebox.showerror("Error", f"Failed to add reply: {message}", parent=self.note_window)
