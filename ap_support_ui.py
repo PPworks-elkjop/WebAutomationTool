@@ -268,27 +268,43 @@ class APSupportWindow:
         self.window.geometry(f"900x700+{x}+{y}")
     
     def _create_ui(self):
-        """Create the support window UI with modern layout."""
-        # Main container - split into left and right columns
-        main_container = tk.Frame(self.window, bg="#f0f0f0")
-        main_container.pack(fill="both", expand=True, padx=10, pady=10)
+        """Create the support window UI with modern layout matching main window."""
+        # Configure modern style
+        style = ttk.Style()
+        style.theme_use('clam')
+        
+        # Modern color scheme (matching main window)
+        bg_color = "#F5F5F5"
+        frame_bg = "#FFFFFF"
+        
+        self.window.configure(bg=bg_color)
+        
+        # Configure ttk styles to match main window
+        style.configure("APSupport.TFrame", background=frame_bg)
+        style.configure("APSupport.TLabelframe", background=frame_bg, borderwidth=0, relief="flat")
+        style.configure("APSupport.TLabelframe.Label", background=frame_bg, foreground="#333333", 
+                       font=("Segoe UI", 11, "bold"))
+        
+        # Main container with padding
+        main_container = ttk.Frame(self.window, padding=15, style="APSupport.TFrame")
+        main_container.pack(fill="both", expand=True)
         
         # LEFT COLUMN
-        left_column = tk.Frame(main_container, bg="#f0f0f0")
-        left_column.pack(side="left", fill="both", expand=True, padx=(0, 5))
+        left_column = ttk.Frame(main_container, style="APSupport.TFrame")
+        left_column.pack(side="left", fill="both", expand=True, padx=(0, 10))
         
         # RIGHT COLUMN
-        right_column = tk.Frame(main_container, bg="#f0f0f0", width=350)
-        right_column.pack(side="right", fill="both", padx=(5, 0))
+        right_column = ttk.Frame(main_container, style="APSupport.TFrame", width=350)
+        right_column.pack(side="right", fill="both", padx=(10, 0))
         right_column.pack_propagate(False)
         
         # === LEFT TOP: AP Information Section ===
-        info_frame = tk.LabelFrame(left_column, text="AP Information", padx=15, pady=15, 
-                                   bg="white", font=("Arial", 10, "bold"))
+        info_frame = ttk.LabelFrame(left_column, text="AP Information", padding=15, 
+                                    style="APSupport.TLabelframe")
         info_frame.pack(fill="x", pady=(0, 10))
         
         # Create info grid
-        info_grid = tk.Frame(info_frame, bg="white")
+        info_grid = ttk.Frame(info_frame, style="APSupport.TFrame")
         info_grid.pack(fill="x")
         
         info_labels = [
@@ -309,22 +325,22 @@ class APSupportWindow:
             row = idx // 2
             col = (idx % 2) * 2
             
-            tk.Label(info_grid, text=label_text, font=("Arial", 9, "bold"), anchor="w", 
-                    width=18, bg="white").grid(row=row, column=col, sticky="w", padx=5, pady=3)
-            value_label = tk.Label(info_grid, text="", font=("Arial", 9), anchor="w", bg="white")
+            tk.Label(info_grid, text=label_text, font=("Segoe UI", 9, "bold"), anchor="w", 
+                    width=18, bg=frame_bg).grid(row=row, column=col, sticky="w", padx=5, pady=3)
+            value_label = tk.Label(info_grid, text="", font=("Segoe UI", 9), anchor="w", bg=frame_bg)
             value_label.grid(row=row, column=col+1, sticky="w", padx=5, pady=3)
             self.info_labels[field] = value_label
         
         # === LEFT: Status Section ===
-        status_frame = tk.LabelFrame(left_column, text="Status", padx=15, pady=10, 
-                                     bg="white", font=("Arial", 10, "bold"))
+        status_frame = ttk.LabelFrame(left_column, text="Status", padding=15, 
+                                      style="APSupport.TLabelframe")
         status_frame.pack(fill="x", pady=(0, 10))
         
-        status_inner = tk.Frame(status_frame, bg="white")
+        status_inner = ttk.Frame(status_frame, style="APSupport.TFrame")
         status_inner.pack(fill="x")
         
-        tk.Label(status_inner, text="Support Status:", font=("Arial", 9, "bold"), 
-                bg="white").pack(side="left")
+        tk.Label(status_inner, text="Support Status:", font=("Segoe UI", 9, "bold"), 
+                bg=frame_bg).pack(side="left")
         self.support_status_var = tk.StringVar(value=self.ap.get('support_status', 'active'))
         status_combo = ttk.Combobox(status_inner, textvariable=self.support_status_var, 
                                     width=15, state="readonly")
@@ -333,44 +349,47 @@ class APSupportWindow:
         status_combo.bind("<<ComboboxSelected>>", self._on_status_change)
         
         tk.Button(status_inner, text="Refresh Data", command=self._refresh_ap_data,
-                 bg="#17A2B8", fg="white", cursor="hand2", padx=15, pady=5,
-                 font=("Arial", 9), relief="flat").pack(side="left", padx=5)
+                 bg="#17A2B8", fg="white", cursor="hand2", padx=15, pady=6,
+                 font=("Segoe UI", 9), relief="flat", bd=0,
+                 activebackground="#138496").pack(side="left", padx=5)
         
         # === LEFT MIDDLE: Placeholder for future features ===
-        middle_frame = tk.Frame(left_column, bg="#f0f0f0", height=100)
+        middle_frame = ttk.Frame(left_column, style="APSupport.TFrame", height=100)
         middle_frame.pack(fill="both", expand=True, pady=(0, 10))
         
         # === LEFT BOTTOM: Connection Section ===
-        connections_container = tk.Frame(left_column, bg="#f0f0f0")
+        connections_container = ttk.Frame(left_column, style="APSupport.TFrame")
         connections_container.pack(fill="x")
         
         # Web Connection
-        web_frame = tk.LabelFrame(connections_container, text="Web", padx=15, pady=10, 
-                                 bg="white", font=("Arial", 10, "bold"))
+        web_frame = ttk.LabelFrame(connections_container, text="Web", padding=15, 
+                                   style="APSupport.TLabelframe")
         web_frame.pack(side="left", fill="both", expand=True, padx=(0, 5))
         
         tk.Button(web_frame, text="Open in Browser", command=self._connect_browser, 
-                 bg="#007BFF", fg="white", cursor="hand2", padx=20, pady=8,
-                 font=("Arial", 10), relief="flat").pack()
+                 bg="#007BFF", fg="white", cursor="hand2", padx=20, pady=10,
+                 font=("Segoe UI", 10), relief="flat", bd=0,
+                 activebackground="#0056b3").pack()
         
         # SSH Connection
-        ssh_frame = tk.LabelFrame(connections_container, text="SSH", padx=15, pady=10, 
-                                 bg="white", font=("Arial", 10, "bold"))
+        ssh_frame = ttk.LabelFrame(connections_container, text="SSH", padding=15, 
+                                   style="APSupport.TLabelframe")
         ssh_frame.pack(side="left", fill="both", expand=True, padx=(5, 0))
         
         tk.Button(ssh_frame, text="SSH Connection", command=self._connect_ssh, 
-                 bg="#6C757D", fg="white", cursor="hand2", padx=20, pady=8,
-                 font=("Arial", 10), state="disabled", relief="flat").pack()
+                 bg="#6C757D", fg="white", cursor="hand2", padx=20, pady=10,
+                 font=("Segoe UI", 10), state="disabled", relief="flat", bd=0,
+                 activebackground="#5A6268").pack()
         
         # === RIGHT TOP: Notes Section ===
-        notes_frame = tk.LabelFrame(right_column, text="Notes", padx=10, pady=10, 
-                                    bg="white", font=("Arial", 10, "bold"))
+        notes_frame = ttk.LabelFrame(right_column, text="Notes", padding=10, 
+                                     style="APSupport.TLabelframe")
         notes_frame.pack(fill="both", expand=True, pady=(0, 10))
         
         # Notes list with scrollbar (2-row format: date/user, then headline)
-        notes_canvas = tk.Canvas(notes_frame, bg="white", highlightthickness=0)
+        notes_canvas = tk.Canvas(notes_frame, bg=frame_bg, highlightthickness=0)
         notes_scroll = ttk.Scrollbar(notes_frame, orient="vertical", command=notes_canvas.yview)
-        self.notes_container = tk.Frame(notes_canvas, bg="white")
+        self.notes_container = tk.Frame(notes_canvas, bg=frame_bg)
         
         self.notes_container.bind(
             "<Configure>",
@@ -395,24 +414,26 @@ class APSupportWindow:
         self.note_window_modified = False
         
         # === RIGHT MIDDLE: Jira Tickets Placeholder ===
-        jira_frame = tk.LabelFrame(right_column, text="Jira Tickets", padx=10, pady=10, 
-                                   bg="white", font=("Arial", 10, "bold"))
+        jira_frame = ttk.LabelFrame(right_column, text="Jira Tickets", padding=10, 
+                                    style="APSupport.TLabelframe")
         jira_frame.pack(fill="x", pady=(0, 10))
         
         tk.Label(jira_frame, text="Jira integration coming soon...", 
-                font=("Arial", 9, "italic"), fg="gray", bg="white").pack()
+                font=("Segoe UI", 9, "italic"), fg="#888888", bg=frame_bg).pack()
         
         # === RIGHT BOTTOM: Action Buttons ===
-        action_frame = tk.Frame(right_column, bg="#f0f0f0")
+        action_frame = ttk.Frame(right_column, style="APSupport.TFrame")
         action_frame.pack(fill="x")
         
         tk.Button(action_frame, text="Open Another AP", command=self._open_another_ap,
-                 bg="#007BFF", fg="white", cursor="hand2", padx=20, pady=8,
-                 font=("Arial", 10), relief="flat").pack(fill="x", pady=(0, 5))
+                 bg="#007BFF", fg="white", cursor="hand2", padx=20, pady=10,
+                 font=("Segoe UI", 10), relief="flat", bd=0,
+                 activebackground="#0056b3").pack(fill="x", pady=(0, 5))
         
         tk.Button(action_frame, text="Close Window", command=self._on_close,
-                 bg="#6C757D", fg="white", cursor="hand2", padx=20, pady=8,
-                 font=("Arial", 10), relief="flat").pack(fill="x")
+                 bg="#6C757D", fg="white", cursor="hand2", padx=20, pady=10,
+                 font=("Segoe UI", 10), relief="flat", bd=0,
+                 activebackground="#5A6268").pack(fill="x")
     
     def _load_data(self):
         """Load AP data into the UI."""
@@ -471,19 +492,20 @@ class APSupportWindow:
         
         # Create note items in 2-row format
         for idx, note in enumerate(self.notes_data):
-            note_frame = tk.Frame(self.notes_container, bg="white", relief="raised", 
-                                 borderwidth=1, cursor="hand2")
-            note_frame.pack(fill="x", pady=2, padx=2)
+            note_frame = tk.Frame(self.notes_container, bg="#FFFFFF", relief="solid", 
+                                 borderwidth=1, cursor="hand2", highlightbackground="#E0E0E0",
+                                 highlightthickness=1)
+            note_frame.pack(fill="x", pady=3, padx=3)
             
             # Row 1: Date/Time and User
             row1 = tk.Label(note_frame, text=f"{note['created_at']} - {note['user']}", 
-                          font=("Arial", 8), fg="gray", bg="white", anchor="w")
-            row1.pack(fill="x", padx=5, pady=(2, 0))
+                          font=("Segoe UI", 8), fg="#888888", bg="#FFFFFF", anchor="w")
+            row1.pack(fill="x", padx=8, pady=(5, 0))
             
             # Row 2: Headline
             row2 = tk.Label(note_frame, text=note['headline'], 
-                          font=("Arial", 9, "bold"), bg="white", anchor="w")
-            row2.pack(fill="x", padx=5, pady=(0, 2))
+                          font=("Segoe UI", 9, "bold"), bg="#FFFFFF", anchor="w", fg="#333333")
+            row2.pack(fill="x", padx=8, pady=(0, 5))
             
             # Bind click events
             for widget in [note_frame, row1, row2]:
@@ -558,31 +580,34 @@ class APSupportWindow:
         """Create a new note detail/edit window."""
         self.note_window = tk.Toplevel(self.window)
         self.note_window.title(f"Note - {note['headline']}")
-        self.note_window.geometry("600x500")
+        self.note_window.geometry("650x550")
+        self.note_window.configure(bg="#FFFFFF")
         self.note_window_modified = False
         
         # Store current note ID
         self.current_note_id = note['id']
         
         # Header with note info
-        header = tk.Frame(self.note_window, bg="#f8f9fa", relief="solid", borderwidth=1)
-        header.pack(fill="x", padx=10, pady=10)
+        header = tk.Frame(self.note_window, bg="#F8F9FA", relief="solid", borderwidth=1)
+        header.pack(fill="x", padx=15, pady=15)
         
         tk.Label(header, text=f"Created: {note['created_at']}", 
-                font=("Arial", 9), bg="#f8f9fa").pack(anchor="w", padx=10, pady=2)
+                font=("Segoe UI", 9), bg="#F8F9FA").pack(anchor="w", padx=15, pady=3)
         tk.Label(header, text=f"By: {note['user']}", 
-                font=("Arial", 9), bg="#f8f9fa").pack(anchor="w", padx=10, pady=2)
+                font=("Segoe UI", 9), bg="#F8F9FA").pack(anchor="w", padx=15, pady=3)
         
         if note.get('updated_at') and note['updated_at'] != note['created_at']:
             tk.Label(header, text=f"Last edited: {note['updated_at']} by {note.get('updated_by', 'unknown')}", 
-                    font=("Arial", 8, "italic"), fg="gray", bg="#f8f9fa").pack(anchor="w", padx=10, pady=2)
+                    font=("Segoe UI", 8, "italic"), fg="#888888", bg="#F8F9FA").pack(anchor="w", padx=15, pady=3)"}
         
         # Headline
-        headline_frame = tk.Frame(self.note_window)
-        headline_frame.pack(fill="x", padx=10, pady=(0, 10))
+        headline_frame = tk.Frame(self.note_window, bg="#FFFFFF")
+        headline_frame.pack(fill="x", padx=15, pady=(0, 10))
         
-        tk.Label(headline_frame, text="Headline:", font=("Arial", 9, "bold")).pack(anchor="w")
-        self.note_window_headline = tk.Entry(headline_frame, font=("Arial", 10))
+        tk.Label(headline_frame, text="Headline:", font=("Segoe UI", 10, "bold"), 
+                bg="#FFFFFF").pack(anchor="w", pady=(0, 5))
+        self.note_window_headline = tk.Entry(headline_frame, font=("Segoe UI", 10), 
+                                             relief="solid", borderwidth=1)
         self.note_window_headline.pack(fill="x")
         self.note_window_headline.insert(0, note['headline'])
         
@@ -595,12 +620,14 @@ class APSupportWindow:
             self.note_window_headline.config(state="readonly")
         
         # Note content
-        content_frame = tk.Frame(self.note_window)
-        content_frame.pack(fill="both", expand=True, padx=10)
+        content_frame = tk.Frame(self.note_window, bg="#FFFFFF")
+        content_frame.pack(fill="both", expand=True, padx=15)
         
-        tk.Label(content_frame, text="Note:", font=("Arial", 9, "bold")).pack(anchor="w")
-        self.note_window_text = scrolledtext.ScrolledText(content_frame, font=("Arial", 10), 
-                                                          wrap=tk.WORD, height=15)
+        tk.Label(content_frame, text="Note:", font=("Segoe UI", 10, "bold"), 
+                bg="#FFFFFF").pack(anchor="w", pady=(0, 5))
+        self.note_window_text = scrolledtext.ScrolledText(content_frame, font=("Segoe UI", 10), 
+                                                          wrap=tk.WORD, height=12, relief="solid", 
+                                                          borderwidth=1)
         self.note_window_text.pack(fill="both", expand=True)
         self.note_window_text.insert("1.0", note['note'])
         
@@ -614,34 +641,40 @@ class APSupportWindow:
             self.note_window_headline.bind("<KeyRelease>", on_modify)
         
         # Reply section
-        reply_frame = tk.LabelFrame(self.note_window, text="Add Reply", padx=10, pady=10)
-        reply_frame.pack(fill="x", padx=10, pady=(10, 0))
+        reply_frame = tk.LabelFrame(self.note_window, text="Add Reply", padx=15, pady=10,
+                                    bg="#FFFFFF", font=("Segoe UI", 10, "bold"))
+        reply_frame.pack(fill="x", padx=15, pady=(10, 0))
         
-        tk.Label(reply_frame, text="Reply:").pack(anchor="w")
+        tk.Label(reply_frame, text="Reply:", bg="#FFFFFF", font=("Segoe UI", 9)).pack(anchor="w", pady=(0, 5))
         self.note_window_reply = scrolledtext.ScrolledText(reply_frame, height=4, 
-                                                           font=("Arial", 10), wrap=tk.WORD)
+                                                           font=("Segoe UI", 10), wrap=tk.WORD,
+                                                           relief="solid", borderwidth=1)
         self.note_window_reply.pack(fill="x")
         
         # Buttons
-        btn_frame = tk.Frame(self.note_window)
-        btn_frame.pack(fill="x", padx=10, pady=10)
+        btn_frame = tk.Frame(self.note_window, bg="#FFFFFF")
+        btn_frame.pack(fill="x", padx=15, pady=15)
         
         if can_edit:
             tk.Button(btn_frame, text="Save Changes", command=self._save_note_from_window,
-                     bg="#28A745", fg="white", padx=20, pady=8, relief="flat",
-                     cursor="hand2").pack(side="left", padx=5)
+                     bg="#28A745", fg="white", padx=20, pady=10, relief="flat", bd=0,
+                     cursor="hand2", font=("Segoe UI", 10),
+                     activebackground="#218838").pack(side="left", padx=5)
             
             tk.Button(btn_frame, text="Delete Note", command=self._delete_note_from_window,
-                     bg="#DC3545", fg="white", padx=20, pady=8, relief="flat",
-                     cursor="hand2").pack(side="left", padx=5)
+                     bg="#DC3545", fg="white", padx=20, pady=10, relief="flat", bd=0,
+                     cursor="hand2", font=("Segoe UI", 10),
+                     activebackground="#C82333").pack(side="left", padx=5)
         
         tk.Button(btn_frame, text="Add Reply", command=self._add_reply_from_window,
-                 bg="#007BFF", fg="white", padx=20, pady=8, relief="flat",
-                 cursor="hand2").pack(side="left", padx=5)
+                 bg="#007BFF", fg="white", padx=20, pady=10, relief="flat", bd=0,
+                 cursor="hand2", font=("Segoe UI", 10),
+                 activebackground="#0056b3").pack(side="left", padx=5)
         
         tk.Button(btn_frame, text="Close", command=self._close_note_window,
-                 bg="#6C757D", fg="white", padx=20, pady=8, relief="flat",
-                 cursor="hand2").pack(side="right", padx=5)
+                 bg="#6C757D", fg="white", padx=20, pady=10, relief="flat", bd=0,
+                 cursor="hand2", font=("Segoe UI", 10),
+                 activebackground="#5A6268").pack(side="right", padx=5)
     
     def _update_note_window(self, note):
         """Update the existing note window with different note."""
