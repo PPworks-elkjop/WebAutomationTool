@@ -1062,6 +1062,64 @@ class DatabaseManager:
             row = cursor.fetchone()
             return row['count'] if row else 0
     
+    def update_note_reply(self, reply_id: int, reply_text: str, user: str) -> Tuple[bool, str]:
+        """Update a note reply."""
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                # First check if this user owns the reply
+                cursor.execute('''
+                    SELECT user FROM support_note_replies 
+                    WHERE id = ? AND is_deleted = 0
+                ''', (reply_id,))
+                row = cursor.fetchone()
+                
+                if not row:
+                    return False, "Reply not found"
+                
+                if row['user'] != user:
+                    return False, "You can only edit your own replies"
+                
+                # Update the reply
+                cursor.execute('''
+                    UPDATE support_note_replies 
+                    SET reply_text = ?
+                    WHERE id = ?
+                ''', (reply_text, reply_id))
+                conn.commit()
+                return True, "Reply updated successfully"
+        except Exception as e:
+            return False, f"Error updating reply: {str(e)}"
+    
+    def delete_note_reply(self, reply_id: int, user: str) -> Tuple[bool, str]:
+        """Delete (soft delete) a note reply."""
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                # First check if this user owns the reply
+                cursor.execute('''
+                    SELECT user FROM support_note_replies 
+                    WHERE id = ? AND is_deleted = 0
+                ''', (reply_id,))
+                row = cursor.fetchone()
+                
+                if not row:
+                    return False, "Reply not found"
+                
+                if row['user'] != user:
+                    return False, "You can only delete your own replies"
+                
+                # Soft delete the reply
+                cursor.execute('''
+                    UPDATE support_note_replies 
+                    SET is_deleted = 1 
+                    WHERE id = ?
+                ''', (reply_id,))
+                conn.commit()
+                return True, "Reply deleted successfully"
+        except Exception as e:
+            return False, f"Error deleting reply: {str(e)}"
+    
     def update_support_status(self, ap_id: str, status: str) -> Tuple[bool, str]:
         """Update the support status of an AP.
         
