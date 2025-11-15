@@ -145,8 +145,8 @@ class WebAutomationWorker:
             
             # Check if Cato Networks warning page is present
             has_warning = 'Warning - Restricted Website' in page_source
-            has_ssl_error = 'Invalid SSL/TLS certificate - IP address mismatch' in page_source
-            has_proceed_button = 'class="proceed prompt"' in page_source
+            has_ssl_error = 'Invalid SSL/TLS certificate' in page_source
+            has_proceed_button = 'class="proceed prompt"' in page_source or 'onclick="onProceed()"' in page_source
             
             self.log(f"[Cato Check] Warning text: {has_warning}, SSL error: {has_ssl_error}, Proceed button: {has_proceed_button}")
             
@@ -204,24 +204,28 @@ class WebAutomationWorker:
                             self.log(f"✗ JavaScript click also failed: {str(js_err)}")
                             return False
                     
-                    # Wait longer for page to process the click
-                    time.sleep(3)
+                    # Wait 2 seconds then refresh the page as per Cato requirements
+                    self.log("⏱ Waiting 2 seconds before refresh...")
+                    time.sleep(2)
                     
-                    # Refresh the page
-                    active_driver.refresh()
-                    self.log("✓ Page refreshed after Cato warning")
-                    
-                    # Wait for page to fully reload
-                    time.sleep(4)
-                    
-                    # Wait for body element to be present (ensures page loaded)
+                    # Refresh to get past Cato warning
                     try:
+                        self.log("🔄 Refreshing page after Cato PROCEED...")
+                        active_driver.refresh()
+                        self.log("✓ Page refreshed successfully")
+                        
+                        # Wait for page to load after refresh
+                        time.sleep(3)
+                        
+                        # Wait for body element
                         WebDriverWait(active_driver, 10).until(
                             EC.presence_of_element_located((By.TAG_NAME, "body"))
                         )
-                        self.log("✓ Page fully reloaded")
-                    except:
-                        self.log("⚠ Warning: Page reload might be incomplete")
+                        self.log("✓ Page loaded after Cato warning handling")
+                        
+                    except Exception as refresh_err:
+                        self.log(f"⚠ Error during page refresh: {str(refresh_err)}")
+                        # Continue anyway, page might have loaded
                     
                     return True
                 except Exception as e:

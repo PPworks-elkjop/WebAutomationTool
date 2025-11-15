@@ -157,10 +157,12 @@ class BrowserManager:
                     self.driver.switch_to.window(tab_handle)
                     
                     # Set authentication via CDP
+                    self.log(f"  Setting CDP authentication for {ap_id} (user: {username})")
                     self.driver.execute_cdp_cmd('Network.enable', {})
                     import base64
                     auth_header = 'Basic ' + base64.b64encode(f'{username}:{password}'.encode()).decode()
                     self.driver.execute_cdp_cmd('Network.setExtraHTTPHeaders', {'headers': {'Authorization': auth_header}})
+                    self.log(f"  ✓ CDP authentication headers set")
                     
                     # Try to navigate with timeout handling
                     from selenium.common.exceptions import TimeoutException
@@ -169,6 +171,18 @@ class BrowserManager:
                     except TimeoutException:
                         self.log(f"⚠ Navigation timeout for {ap_id}, but continuing...")
                         # Page is still loading, we'll check the result in verification phase
+                    
+                    # Wait a bit for page to load, then check for Cato warning (same as Quick Connect)
+                    time.sleep(2)
+                    
+                    # Check for and handle Cato warning immediately after navigation
+                    if self.handle_cato_callback:
+                        try:
+                            cato_detected = self.handle_cato_callback(self.driver)
+                            if cato_detected:
+                                self.log(f"✓ Cato warning handled for {ap_id}")
+                        except Exception as e:
+                            self.log(f"⚠ Error checking Cato warning for {ap_id}: {str(e)}")
                     
                     self.ap_tabs.append({
                         'handle': tab_handle,
@@ -198,42 +212,9 @@ class BrowserManager:
             
             self.log(f"✓ All {total_aps} tabs are now loading")
             
-            # PHASE 3: Handle Cato warnings
-            self.log(f"\n=== Phase 3: Handling Cato warnings on all tabs ===")
-            self.progress("Checking for Cato warnings...", 50)
-            
-            for index, tab_info in enumerate(self.ap_tabs):
-                ap_id = tab_info['ap_id']
-                tab_handle = tab_info['handle']
-                
-                # Skip tabs that already failed in Phase 2
-                if tab_info.get('status') == 'failed':
-                    continue
-                
-                try:
-                    self.log(f"Checking tab {index + 1}/{total_aps} for Cato warning: {ap_id}")
-                    self.driver.switch_to.window(tab_handle)
-                    
-                    # Give page more time to load before checking for Cato
-                    time.sleep(3)
-                    
-                    if self.handle_cato_callback:
-                        cato_detected = self.handle_cato_callback(self.driver)
-                        if cato_detected:
-                            self.log(f"✓ Cato warning detected and handled for {ap_id}")
-                            # Give extra time after Cato handling
-                            time.sleep(2)
-                        else:
-                            self.log(f"  No Cato warning detected for {ap_id}")
-                    
-                except Exception as e:
-                    self.log(f"Error checking Cato warning for {ap_id}: {str(e)}")
-            
-            self.log(f"✓ Finished checking all tabs for Cato warnings")
-            
-            # PHASE 4: Verify connections
-            self.log(f"\n=== Phase 4: Verifying connections ===")
-            self.progress("Verifying all connections...", 80)
+            # PHASE 3: Verify connections
+            self.log(f"\n=== Phase 3: Verifying connections ===")
+            self.progress("Verifying all connections...", 60)
             
             success_count = 0
             failed_aps = []
@@ -321,8 +302,8 @@ class BrowserManager:
                     if status_dialog:
                         status_dialog.update_status(ap_id, "failed", str(e))
             
-            # PHASE 5: Collect AP information
-            self.log(f"\n=== Phase 5: Collecting AP information ===")
+            # PHASE 4: Collect AP information
+            self.log(f"\n=== Phase 4: Collecting AP information ===")
             self.progress("Collecting AP information...", 85)
             
             from credential_manager_v2 import CredentialManager
@@ -341,8 +322,10 @@ class BrowserManager:
                     
                     status_url = f"{tab_info['url']}/service/status.xml"
                     self.log(f"Collecting info from {ap_id}: {status_url}")
+                    
+                    # Navigate to status.xml (same as Quick Connect - no Cato check needed here)
                     self.driver.get(status_url)
-                    time.sleep(2)
+                    time.sleep(3)
                     
                     page_source = self.driver.page_source
                     

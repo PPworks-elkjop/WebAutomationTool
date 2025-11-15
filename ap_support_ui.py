@@ -261,6 +261,9 @@ class APSupportWindow:
         self._create_ui()
         self._load_data()
         
+        # Start auto-refresh timer (every 10 seconds)
+        self._auto_refresh()
+        
         # Center window
         self.window.update_idletasks()
         x = (self.window.winfo_screenwidth() // 2) - (1100 // 2)
@@ -281,8 +284,8 @@ class APSupportWindow:
         
         # Configure ttk styles to match main window
         style.configure("APSupport.TFrame", background=frame_bg)
-        style.configure("APSupport.TLabelframe", background=frame_bg, borderwidth=1, 
-                       relief="solid", bordercolor="#CCCCCC")
+        style.configure("APSupport.TLabelframe", background=frame_bg, borderwidth=0, 
+                       relief="flat")
         style.configure("APSupport.TLabelframe.Label", background=frame_bg, foreground="#333333", 
                        font=("Segoe UI", 11, "bold"))
         
@@ -294,6 +297,14 @@ class APSupportWindow:
         left_column = ttk.Frame(main_container, style="APSupport.TFrame")
         left_column.pack(side="left", fill="both", expand=True, padx=(0, 10))
         
+        # VERTICAL SEPARATOR with margin
+        separator_container = tk.Frame(main_container, bg=frame_bg)
+        separator_container.pack(side="left", fill="y", padx=5)
+        
+        tk.Frame(separator_container, bg=frame_bg, height=10).pack(side="top")
+        tk.Frame(separator_container, bg="#CCCCCC", width=1).pack(side="top", fill="y", expand=True)
+        tk.Frame(separator_container, bg=frame_bg, height=10).pack(side="bottom")
+        
         # RIGHT COLUMN
         right_column = ttk.Frame(main_container, style="APSupport.TFrame", width=400)
         right_column.pack(side="right", fill="both", padx=(10, 0))
@@ -302,11 +313,15 @@ class APSupportWindow:
         # === LEFT TOP: AP Information Section ===
         info_frame = ttk.LabelFrame(left_column, text="AP Information", padding=15, 
                                     style="APSupport.TLabelframe")
-        info_frame.pack(fill="x", pady=(0, 10))
+        info_frame.pack(fill="x", pady=(0, 5))
         
         # Create info grid
         info_grid = ttk.Frame(info_frame, style="APSupport.TFrame")
         info_grid.pack(fill="x")
+        
+        # Configure grid columns to expand properly
+        info_grid.columnconfigure(1, weight=1)  # Left value column
+        info_grid.columnconfigure(3, weight=1)  # Right value column
         
         info_labels = [
             ("AP ID:", "ap_id"),
@@ -328,14 +343,44 @@ class APSupportWindow:
             
             tk.Label(info_grid, text=label_text, font=("Segoe UI", 9, "bold"), anchor="w", 
                     width=18, bg=frame_bg).grid(row=row, column=col, sticky="w", padx=5, pady=3)
-            value_label = tk.Label(info_grid, text="", font=("Segoe UI", 9), anchor="w", bg=frame_bg)
-            value_label.grid(row=row, column=col+1, sticky="w", padx=5, pady=3)
-            self.info_labels[field] = value_label
+            
+            # Use Entry widget for selectable/copyable text
+            value_entry = tk.Entry(info_grid, font=("Segoe UI", 9), bg=frame_bg, 
+                                  relief="flat", bd=0, readonlybackground=frame_bg,
+                                  state="readonly", cursor="xterm", fg="#333333")
+            value_entry.grid(row=row, column=col+1, sticky="ew", padx=5, pady=3)
+            self.info_labels[field] = value_entry
+        
+        # Action buttons row at bottom of AP Information
+        action_row = tk.Frame(info_frame, bg=frame_bg)
+        action_row.pack(fill="x", pady=(10, 0))
+        
+        # Left side: Check Connection button and result label
+        left_actions = tk.Frame(action_row, bg=frame_bg)
+        left_actions.pack(side="left", fill="x", expand=True)
+        
+        tk.Button(left_actions, text="Check Connection", command=self._check_connection,
+                 bg="#17A2B8", fg="white", cursor="hand2", padx=15, pady=6,
+                 font=("Segoe UI", 9), relief="flat", bd=0,
+                 activebackground="#138496").pack(side="left", padx=(0, 10))
+        
+        self.ping_result_label = tk.Label(left_actions, text="", font=("Segoe UI", 9), 
+                                          bg=frame_bg, anchor="w", fg="#333333")
+        self.ping_result_label.pack(side="left", fill="x", expand=True)
+        
+        # Right side: Show All button
+        tk.Button(action_row, text="Show All", command=self._show_all_fields,
+                 bg="#6C757D", fg="white", cursor="hand2", padx=20, pady=6,
+                 font=("Segoe UI", 9), relief="flat", bd=0,
+                 activebackground="#5A6268").pack(side="right")
+        
+        # Separator line
+        tk.Frame(left_column, bg="#CCCCCC", height=1).pack(fill="x", pady=5)
         
         # === LEFT: Status Section ===
         status_frame = ttk.LabelFrame(left_column, text="Status", padding=15, 
                                       style="APSupport.TLabelframe")
-        status_frame.pack(fill="x", pady=(0, 10))
+        status_frame.pack(fill="x", pady=(0, 5))
         
         status_inner = ttk.Frame(status_frame, style="APSupport.TFrame")
         status_inner.pack(fill="x")
@@ -344,15 +389,17 @@ class APSupportWindow:
                 bg=frame_bg).pack(side="left")
         self.support_status_var = tk.StringVar(value=self.ap.get('support_status', 'active'))
         status_combo = ttk.Combobox(status_inner, textvariable=self.support_status_var, 
-                                    width=15, state="readonly")
+                                    width=15, state="readonly", font=("Segoe UI", 10), height=12)
         status_combo['values'] = ("active", "in_progress", "pending", "resolved", "closed")
-        status_combo.pack(side="left", padx=10)
-        status_combo.bind("<<ComboboxSelected>>", self._on_status_change)
+        status_combo.pack(side="left", padx=(10, 5), ipady=4)
         
-        tk.Button(status_inner, text="Refresh Data", command=self._refresh_ap_data,
-                 bg="#17A2B8", fg="white", cursor="hand2", padx=15, pady=6,
-                 font=("Segoe UI", 9), relief="flat", bd=0,
-                 activebackground="#138496").pack(side="left", padx=5)
+        tk.Button(status_inner, text="Save", command=self._on_status_change,
+                 bg="#28A745", fg="white", cursor="hand2", padx=20, pady=6,
+                 font=("Segoe UI", 10, "bold"), relief="flat", bd=0,
+                 activebackground="#218838").pack(side="left", padx=5)
+        
+        # Separator line
+        tk.Frame(left_column, bg="#CCCCCC", height=1).pack(fill="x", pady=5)
         
         # === LEFT MIDDLE: Placeholder for future features ===
         middle_frame = ttk.Frame(left_column, style="APSupport.TFrame", height=100)
@@ -360,7 +407,7 @@ class APSupportWindow:
         
         # === LEFT BOTTOM: Connection Section ===
         connections_container = ttk.Frame(left_column, style="APSupport.TFrame")
-        connections_container.pack(fill="x", pady=(0, 10))
+        connections_container.pack(fill="x", pady=(0, 5))
         
         # Web Connection
         web_frame = ttk.LabelFrame(connections_container, text="Web", padding=15, 
@@ -379,19 +426,24 @@ class APSupportWindow:
             "Navigate to Status",
             "Work with Provisioning",
             "Work with SSH",
-            "Do a Software Update"
+            "Do a Software Update",
+            "Show Log"
         )
         self.web_action_combo.pack(side="left", fill="x", expand=True, padx=(0, 5), ipady=4)
         self.web_action_combo.bind("<<ComboboxSelected>>", self._on_web_action_change)
         
         self.web_run_btn = tk.Button(web_control_frame, text="Run", command=self._run_web_action,
-                                     bg="#007BFF", fg="white", cursor="hand2", padx=20, pady=10,
+                                     bg="#007BFF", fg="white", cursor="hand2", padx=20, pady=6,
                                      font=("Segoe UI", 10, "bold"), relief="flat", bd=0,
-                                     state="disabled", activebackground="#0056b3")
+                                     state="disabled", disabledforeground="white", activebackground="#0056b3")
         self.web_run_btn.pack(side="left")
         
         # Track browser state
         self.browser_connected = False
+        
+        # Vertical separator between Web and SSH
+        separator = tk.Frame(connections_container, bg="#CCCCCC", width=1)
+        separator.pack(side="left", fill="y", padx=10)
         
         # SSH Connection
         ssh_frame = ttk.LabelFrame(connections_container, text="SSH", padding=15,
@@ -412,10 +464,13 @@ class APSupportWindow:
         self.ssh_action_combo.bind("<<ComboboxSelected>>", self._on_ssh_action_change)
         
         self.ssh_run_btn = tk.Button(ssh_control_frame, text="Run", command=self._run_ssh_action,
-                                     bg="#6C757D", fg="white", cursor="hand2", padx=20, pady=10,
+                                     bg="#6C757D", fg="white", cursor="hand2", padx=20, pady=6,
                                      font=("Segoe UI", 10, "bold"), relief="flat", bd=0,
-                                     state="disabled", activebackground="#5A6268")
+                                     state="disabled", disabledforeground="white", activebackground="#5A6268")
         self.ssh_run_btn.pack(side="left")
+        
+        # Separator line
+        tk.Frame(left_column, bg="#CCCCCC", height=1).pack(fill="x", pady=5)
         
         # === Activity Log ===
         activity_frame = ttk.LabelFrame(left_column, text="Activity", padding=10,
@@ -431,31 +486,51 @@ class APSupportWindow:
         self._log_activity("Ready")
         
         # === RIGHT TOP: Notes Section ===
-        notes_frame = ttk.LabelFrame(right_column, text="Notes", padding=10, 
-                                     style="APSupport.TLabelframe")
-        notes_frame.pack(fill="both", expand=True, pady=(0, 10))
+        notes_frame = ttk.Frame(right_column, style="APSupport.TFrame", height=280)
+        notes_frame.pack(fill="x", pady=(0, 10))
+        notes_frame.pack_propagate(False)
         
-        # Write Note button
-        tk.Button(notes_frame, text="Write Note", command=self._open_write_note_dialog,
-                 bg="#28A745", fg="white", cursor="hand2", padx=20, pady=8,
+        # Notes header
+        notes_header = tk.Frame(notes_frame, bg=frame_bg)
+        notes_header.pack(fill="x", pady=(0, 10))
+        
+        tk.Label(notes_header, text="Notes", font=("Segoe UI", 11, "bold"),
+                bg=frame_bg, fg="#333333").pack(side="left")
+        
+        tk.Button(notes_header, text="Write Note", command=self._open_write_note_dialog,
+                 bg="#28A745", fg="white", cursor="hand2", padx=15, pady=6,
                  font=("Segoe UI", 9, "bold"), relief="flat", bd=0,
-                 activebackground="#218838").pack(fill="x", pady=(0, 10))
+                 activebackground="#218838").pack(side="right")
+        
+        # Thin separator line
+        tk.Frame(notes_frame, bg="#CCCCCC", height=1).pack(fill="x", pady=(0, 10))
+        
+        # Notes list container with scrollbar
+        notes_list_frame = tk.Frame(notes_frame, bg=frame_bg)
+        notes_list_frame.pack(fill="both", expand=True)
         
         # Notes list with scrollbar (2-row format: date/user, then headline)
-        notes_canvas = tk.Canvas(notes_frame, bg=frame_bg, highlightthickness=0)
-        notes_scroll = ttk.Scrollbar(notes_frame, orient="vertical", command=notes_canvas.yview)
+        notes_canvas = tk.Canvas(notes_list_frame, bg=frame_bg, highlightthickness=0)
+        notes_scroll = tk.Scrollbar(notes_list_frame, orient="vertical", command=notes_canvas.yview,
+                                   bg="#F5F5F5", troughcolor="#F5F5F5", width=12,
+                                   activebackground="#CCCCCC", bd=0, relief="flat")
         self.notes_container = tk.Frame(notes_canvas, bg=frame_bg)
         
-        self.notes_container.bind(
-            "<Configure>",
-            lambda e: notes_canvas.configure(scrollregion=notes_canvas.bbox("all"))
-        )
+        # Bind container size changes
+        def _update_scroll_region(event):
+            notes_canvas.configure(scrollregion=notes_canvas.bbox("all"))
+            # Set canvas window width to match canvas width minus scrollbar
+            canvas_width = notes_canvas.winfo_width()
+            notes_canvas.itemconfig(notes_window, width=canvas_width)
         
-        notes_canvas.create_window((0, 0), window=self.notes_container, anchor="nw")
+        self.notes_container.bind("<Configure>", _update_scroll_region)
+        notes_canvas.bind("<Configure>", _update_scroll_region)
+        
+        notes_window = notes_canvas.create_window((0, 0), window=self.notes_container, anchor="nw")
         notes_canvas.configure(yscrollcommand=notes_scroll.set)
         
         notes_canvas.pack(side="left", fill="both", expand=True)
-        notes_scroll.pack(side="right", fill="y")
+        notes_scroll.pack(side="right", fill="y", padx=(2, 0))
         
         # Mouse wheel scrolling for notes
         def _on_notes_mousewheel(event):
@@ -471,10 +546,13 @@ class APSupportWindow:
         # === RIGHT MIDDLE: Jira Tickets Placeholder ===
         jira_frame = ttk.LabelFrame(right_column, text="Jira Tickets", padding=10, 
                                     style="APSupport.TLabelframe")
-        jira_frame.pack(fill="x", pady=(0, 10))
+        jira_frame.pack(fill="both", expand=True, pady=(0, 10))
         
         tk.Label(jira_frame, text="Jira integration coming soon...", 
                 font=("Segoe UI", 9, "italic"), fg="#888888", bg=frame_bg).pack()
+        
+        # Separator line
+        tk.Frame(right_column, bg="#CCCCCC", height=1).pack(fill="x", pady=5)
         
         # === RIGHT BOTTOM: Action Buttons ===
         action_frame = ttk.Frame(right_column, style="APSupport.TFrame")
@@ -492,13 +570,18 @@ class APSupportWindow:
     
     def _load_data(self):
         """Load AP data into the UI."""
-        # Populate info labels
-        for field, label in self.info_labels.items():
+        # Populate info entry widgets
+        for field, entry in self.info_labels.items():
             value = self.ap.get(field, '')
+            entry.config(state="normal")
+            entry.delete(0, tk.END)
             if value:
-                label.config(text=str(value))
+                entry.insert(0, str(value))
+                entry.config(foreground="#333333")
             else:
-                label.config(text="-", fg="gray")
+                entry.insert(0, "-")
+                entry.config(foreground="gray")
+            entry.config(state="readonly")
         
         # Update support status
         self.support_status_var.set(self.ap.get('support_status', 'active'))
@@ -506,20 +589,57 @@ class APSupportWindow:
         # Load support notes
         self._refresh_notes()
     
-    def _refresh_ap_data(self):
-        """Refresh AP data from database."""
+    def _auto_refresh(self):
+        """Auto-refresh data from database every 10 seconds."""
+        if not self.window.winfo_exists():
+            return  # Window closed, stop refreshing
+        
         # Reload AP from database
         updated_ap = self.db.get_access_point(self.ap_id)
         if updated_ap:
             self.ap = updated_ap
             
-            # Update all info labels
-            for field, label in self.info_labels.items():
+            # Update all info entry widgets
+            for field, entry in self.info_labels.items():
                 value = self.ap.get(field, '')
+                entry.config(state="normal")
+                entry.delete(0, tk.END)
                 if value:
-                    label.config(text=str(value), fg="black")
+                    entry.insert(0, str(value))
+                    entry.config(foreground="#333333")
                 else:
-                    label.config(text="-", fg="gray")
+                    entry.insert(0, "-")
+                    entry.config(foreground="gray")
+                entry.config(state="readonly")
+            
+            # Update support status
+            self.support_status_var.set(self.ap.get('support_status', 'active'))
+            
+            # Refresh notes
+            self._refresh_notes()
+        
+        # Schedule next refresh in 10 seconds
+        self.window.after(10000, self._auto_refresh)
+    
+    def _refresh_ap_data(self):
+        """Manually refresh AP data from database."""
+        # Reload AP from database
+        updated_ap = self.db.get_access_point(self.ap_id)
+        if updated_ap:
+            self.ap = updated_ap
+            
+            # Update all info entry widgets
+            for field, entry in self.info_labels.items():
+                value = self.ap.get(field, '')
+                entry.config(state="normal")
+                entry.delete(0, tk.END)
+                if value:
+                    entry.insert(0, str(value))
+                    entry.config(foreground="#333333")
+                else:
+                    entry.insert(0, "-")
+                    entry.config(foreground="gray")
+                entry.config(state="readonly")
             
             # Update support status
             self.support_status_var.set(self.ap.get('support_status', 'active'))
@@ -547,14 +667,12 @@ class APSupportWindow:
         
         # Create note items in 2-row format
         for idx, note in enumerate(self.notes_data):
-            note_frame = tk.Frame(self.notes_container, bg="#FFFFFF", relief="solid", 
-                                 borderwidth=1, cursor="hand2", highlightbackground="#E0E0E0",
-                                 highlightthickness=1)
-            note_frame.pack(fill="both", expand=True, pady=3, padx=0)
+            note_frame = tk.Frame(self.notes_container, bg="#FFFFFF", cursor="hand2")
+            note_frame.pack(fill="x", pady=3, padx=0)
             
             # Row 1: Date/Time, User, and Reply count
             row1_frame = tk.Frame(note_frame, bg="#FFFFFF")
-            row1_frame.pack(fill="x", padx=8, pady=(5, 0))
+            row1_frame.pack(fill="x", padx=0, pady=(5, 0))
             
             tk.Label(row1_frame, text=f"{note['created_at']} - {note['user']}", 
                     font=("Segoe UI", 8), fg="#888888", bg="#FFFFFF", anchor="w").pack(side="left")
@@ -568,7 +686,10 @@ class APSupportWindow:
             # Row 2: Headline
             row2 = tk.Label(note_frame, text=note['headline'], 
                           font=("Segoe UI", 9, "bold"), bg="#FFFFFF", anchor="w", fg="#333333")
-            row2.pack(fill="x", padx=8, pady=(0, 5))
+            row2.pack(fill="x", padx=0, pady=(0, 5))
+            
+            # Add thin separator line after each note
+            tk.Frame(note_frame, bg="#E0E0E0", height=1).pack(fill="x", pady=(5, 0))
             
             # Bind click events
             for widget in [note_frame, row1_frame, row2]:
@@ -577,6 +698,123 @@ class APSupportWindow:
                     child.bind("<Button-1>", lambda e, n=note: self._open_note_window(n))
             
             self.note_widgets.append(note_frame)
+    
+    def _check_connection(self):
+        """Ping the AP IP address 4 times and display result."""
+        ip_address = self.ap.get('ip_address', '')
+        if not ip_address:
+            self.ping_result_label.config(text="No IP address available", fg="#DC3545")
+            return
+        
+        self.ping_result_label.config(text="Pinging...", fg="#888888")
+        self.window.update_idletasks()
+        
+        import subprocess
+        import platform
+        
+        try:
+            # Ping command differs by OS
+            param = '-n' if platform.system().lower() == 'windows' else '-c'
+            command = ['ping', param, '4', ip_address]
+            
+            result = subprocess.run(command, capture_output=True, text=True, timeout=10)
+            
+            if result.returncode == 0:
+                # Extract statistics from ping output
+                output_lines = result.stdout.split('\n')
+                for line in output_lines:
+                    if 'Average' in line or 'avg' in line:
+                        self.ping_result_label.config(text=f"✓ Connected - {line.strip()}", fg="#28A745")
+                        return
+                self.ping_result_label.config(text="✓ Connected (4/4 packets received)", fg="#28A745")
+            else:
+                self.ping_result_label.config(text="✗ Connection failed", fg="#DC3545")
+        except subprocess.TimeoutExpired:
+            self.ping_result_label.config(text="✗ Timeout", fg="#DC3545")
+        except Exception as e:
+            self.ping_result_label.config(text=f"✗ Error: {str(e)}", fg="#DC3545")
+    
+    def _show_all_fields(self):
+        """Open a window showing all collected AP fields."""
+        # Create new window
+        all_fields_window = tk.Toplevel(self.window)
+        all_fields_window.title(f"All Fields - {self.ap_id}")
+        all_fields_window.geometry("800x600")
+        all_fields_window.configure(bg="#F5F5F5")
+        
+        # Center window
+        all_fields_window.update_idletasks()
+        x = (all_fields_window.winfo_screenwidth() // 2) - (800 // 2)
+        y = (all_fields_window.winfo_screenheight() // 2) - (600 // 2)
+        all_fields_window.geometry(f"800x600+{x}+{y}")
+        
+        # Main container
+        container = tk.Frame(all_fields_window, bg="#FFFFFF")
+        container.pack(fill="both", expand=True, padx=10, pady=10)
+        
+        # Title (fixed at top)
+        title_frame = tk.Frame(container, bg="#FFFFFF")
+        title_frame.pack(fill="x", padx=20, pady=(20, 10))
+        
+        tk.Label(title_frame, text=f"All Collected Fields for {self.ap_id}", 
+                font=("Segoe UI", 14, "bold"), bg="#FFFFFF", fg="#333333").pack(anchor="w")
+        
+        # Separator line
+        tk.Frame(container, bg="#CCCCCC", height=1).pack(fill="x", padx=20)
+        
+        # Scrollable content area
+        content_frame = tk.Frame(container, bg="#FFFFFF")
+        content_frame.pack(fill="both", expand=True, padx=20, pady=10)
+        
+        canvas = tk.Canvas(content_frame, bg="#FFFFFF", highlightthickness=0)
+        scrollbar = tk.Scrollbar(content_frame, orient="vertical", command=canvas.yview)
+        scrollable_frame = tk.Frame(canvas, bg="#FFFFFF")
+        
+        scrollable_frame.bind(
+            "<Configure>",
+            lambda e: canvas.configure(scrollregion=canvas.bbox("all"))
+        )
+        
+        canvas.create_window((0, 0), window=scrollable_frame, anchor="nw")
+        canvas.configure(yscrollcommand=scrollbar.set)
+        
+        # Display all AP data fields with selectable text
+        for idx, (key, value) in enumerate(sorted(self.ap.items())):
+            row_frame = tk.Frame(scrollable_frame, bg="#F8F9FA" if idx % 2 == 0 else "#FFFFFF")
+            row_frame.pack(fill="x", pady=1)
+            
+            # Key label
+            key_label = tk.Label(row_frame, text=f"{key}:", font=("Segoe UI", 9, "bold"), 
+                                anchor="w", width=25, bg=row_frame['bg'], padx=10, pady=5)
+            key_label.pack(side="left")
+            
+            # Value as Text widget for copy functionality
+            value_text = tk.Text(row_frame, font=("Segoe UI", 9), height=1, wrap="word",
+                                bg=row_frame['bg'], relief="flat", bd=0, cursor="xterm",
+                                highlightthickness=0)
+            value_text.insert("1.0", str(value) if value else "-")
+            value_text.config(state="disabled")  # Make read-only but still selectable
+            value_text.pack(side="left", fill="x", expand=True, padx=10, pady=5)
+            
+            # Auto-adjust height based on content
+            def adjust_height(widget, event=None):
+                widget.configure(height=int(widget.index('end-1c').split('.')[0]))
+            value_text.bind("<Configure>", lambda e, w=value_text: adjust_height(w))
+        
+        canvas.pack(side="left", fill="both", expand=True)
+        scrollbar.pack(side="right", fill="y")
+        
+        # Separator line
+        tk.Frame(container, bg="#CCCCCC", height=1).pack(fill="x", padx=20)
+        
+        # Close button (fixed at bottom)
+        button_frame = tk.Frame(container, bg="#FFFFFF")
+        button_frame.pack(fill="x", padx=20, pady=(10, 20))
+        
+        tk.Button(button_frame, text="Close", command=all_fields_window.destroy,
+                 bg="#6C757D", fg="white", cursor="hand2", padx=30, pady=10,
+                 font=("Segoe UI", 10, "bold"), relief="flat", bd=0,
+                 activebackground="#5A6268").pack()
     
     def _on_status_change(self, event=None):
         """Handle support status change."""
@@ -626,6 +864,8 @@ class APSupportWindow:
             self._work_with_ssh()
         elif action == "Do a Software Update":
             self._do_software_update()
+        elif action == "Show Log":
+            self._show_log()
     
     def _run_ssh_action(self):
         """Execute the selected SSH action."""
@@ -640,63 +880,259 @@ class APSupportWindow:
         self._log_activity("✓ Browser connected - all actions available")
     
     def _navigate_to_status(self):
-        """Navigate to status page."""
+        """Navigate to status page and fetch information."""
         if not self.browser_connected:
             messagebox.showwarning("Not Connected", "Please open Web UI first.", parent=self.window)
             return
+        
+        ip = self.ap.get('ip_address', '')
+        if not ip:
+            self._log_activity("✗ Missing IP address")
+            return
+        
         self._log_activity("Navigating to Status page...")
-        # TODO: Implement navigation
-        messagebox.showinfo("Coming Soon", "Status navigation will be implemented.", parent=self.window)
+        
+        try:
+            worker = self.browser_helper.worker
+            status_url = f"http://{ip}/service/status.xml"
+            self._log_activity(f"Loading {status_url}")
+            worker.driver.get(status_url)
+            import time
+            time.sleep(3)
+            
+            page_source = worker.driver.page_source
+            self._log_activity(f"✓ Status page loaded")
+            # Could extract and display info here if needed
+            
+        except Exception as e:
+            self._log_activity(f"✗ Error: {str(e)}")
+            messagebox.showerror("Error", f"Failed to navigate: {str(e)}", parent=self.window)
     
     def _work_with_provisioning(self):
         """Work with provisioning settings."""
         if not self.browser_connected:
             messagebox.showwarning("Not Connected", "Please open Web UI first.", parent=self.window)
             return
-        self._log_activity("Opening Provisioning settings...")
-        # TODO: Implement provisioning
-        messagebox.showinfo("Coming Soon", "Provisioning features will be implemented.", parent=self.window)
+        
+        # Show dialog to get action (same as main window)
+        from provisioning_dialog import ProvisioningDialog
+        dialog = ProvisioningDialog(self.window)
+        action = dialog.show()
+        
+        if action is None:  # User canceled
+            self._log_activity("Provisioning operation canceled")
+            return
+        
+        self._log_activity(f"Executing provisioning action: {action}")
+        
+        try:
+            worker = self.browser_helper.worker
+            result = worker.manage_provisioning(action)
+            
+            if result['status'] == 'success':
+                self._log_activity(f"✓ {result['message']}")
+                messagebox.showinfo("Success", result['message'], parent=self.window)
+            else:
+                self._log_activity(f"✗ {result['message']}")
+                messagebox.showerror("Error", result['message'], parent=self.window)
+                
+        except Exception as e:
+            self._log_activity(f"✗ Error: {str(e)}")
+            messagebox.showerror("Error", f"Failed to manage provisioning: {str(e)}", parent=self.window)
     
     def _work_with_ssh(self):
         """Configure SSH settings in web UI."""
         if not self.browser_connected:
             messagebox.showwarning("Not Connected", "Please open Web UI first.", parent=self.window)
             return
-        self._log_activity("Opening SSH configuration...")
-        # TODO: Implement SSH configuration
-        messagebox.showinfo("Coming Soon", "SSH configuration will be implemented.", parent=self.window)
+        
+        # Show dialog to get action (same as main window)
+        from ssh_dialog import SSHDialog
+        dialog = SSHDialog(self.window)
+        action = dialog.show()
+        
+        if action is None:  # User canceled
+            self._log_activity("SSH operation canceled")
+            return
+        
+        self._log_activity(f"Executing SSH action: {action}")
+        
+        try:
+            worker = self.browser_helper.worker
+            result = worker.manage_ssh(action)
+            
+            if result['status'] == 'success':
+                self._log_activity(f"✓ {result['message']}")
+                messagebox.showinfo("Success", result['message'], parent=self.window)
+            else:
+                self._log_activity(f"✗ {result['message']}")
+                messagebox.showerror("Error", result['message'], parent=self.window)
+                
+        except Exception as e:
+            self._log_activity(f"✗ Error: {str(e)}")
+            messagebox.showerror("Error", f"Failed to manage SSH: {str(e)}", parent=self.window)
     
     def _do_software_update(self):
         """Perform software update."""
         if not self.browser_connected:
             messagebox.showwarning("Not Connected", "Please open Web UI first.", parent=self.window)
             return
-        self._log_activity("Starting software update...")
-        # TODO: Implement software update
-        messagebox.showinfo("Coming Soon", "Software update will be implemented.", parent=self.window)
+        
+        ip = self.ap.get('ip_address', '')
+        if not ip:
+            self._log_activity("✗ Missing IP address")
+            return
+        
+        self._log_activity("Navigating to software update page...")
+        
+        try:
+            worker = self.browser_helper.worker
+            update_url = f"http://{ip}/admin/updateSoftware.xml"
+            self._log_activity(f"Loading {update_url}")
+            worker.driver.get(update_url)
+            import time
+            time.sleep(2)
+            
+            self._log_activity("✓ Software update page loaded")
+            messagebox.showinfo("Manual Upload Required", 
+                              "The software update page is now open.\n\n"
+                              "Please manually upload the software file through the browser.",
+                              parent=self.window)
+            
+        except Exception as e:
+            self._log_activity(f"✗ Error: {str(e)}")
+            messagebox.showerror("Error", f"Failed to navigate: {str(e)}", parent=self.window)
+    
+    def _show_log(self):
+        """Navigate to system log page."""
+        if not self.browser_connected:
+            messagebox.showwarning("Not Connected", "Please open Web UI first.", parent=self.window)
+            return
+        
+        ip = self.ap.get('ip_address', '')
+        if not ip:
+            self._log_activity("✗ Missing IP address")
+            return
+        
+        self._log_activity("Navigating to system log page...")
+        
+        try:
+            worker = self.browser_helper.worker
+            log_url = f"http://{ip}/service/config/system/viewLog.xml"
+            self._log_activity(f"Loading {log_url}")
+            worker.driver.get(log_url)
+            import time
+            time.sleep(2)
+            
+            self._log_activity("✓ System log page loaded")
+            
+        except Exception as e:
+            self._log_activity(f"✗ Error: {str(e)}")
+            messagebox.showerror("Error", f"Failed to navigate: {str(e)}", parent=self.window)
     
     def _connect_browser(self):
-        """Open AP in browser."""
+        """Open AP in browser using BrowserManager."""
         ip = self.ap.get('ip_address', '')
         username = self.ap.get('username_webui', '')
         password = self.ap.get('password_webui', '')
         
-        if not ip or not username or not password:
+        if not ip:
+            self._log_activity("✗ Missing IP address")
+            messagebox.showwarning("Missing Info", "IP address not available.", parent=self.window)
+            return
+        
+        if not username or not password:
             self._log_activity("✗ Missing credentials")
-            messagebox.showwarning("Missing Info", "IP address or credentials not available.", parent=self.window)
+            messagebox.showwarning("Missing Info", "Username or password not available.", parent=self.window)
             return
         
         self._log_activity(f"Opening browser for {ip}...")
         
-        if self.browser_helper:
-            # TODO: Call browser helper's quick connect
-            # For now, simulate connection
-            self._log_activity(f"✓ Connected to {self.ap_id}")
-            self._enable_web_actions()
-            messagebox.showinfo("Connected", f"Browser opened for {self.ap_id}", parent=self.window)
-        else:
-            self._log_activity("✗ Browser helper not available")
-            messagebox.showwarning("Not Available", "Browser connection not available.", parent=self.window)
+        try:
+            # Use the exact same approach as Quick Connect
+            import time
+            import base64
+            
+            # Get worker from browser_helper
+            if not self.browser_helper or not hasattr(self.browser_helper, 'worker'):
+                self._log_activity("✗ Browser helper not available")
+                messagebox.showerror("Error", "Browser helper not available", parent=self.window)
+                return
+            
+            worker = self.browser_helper.worker
+            
+            # Initialize browser if not already open
+            if not worker.driver:
+                self._log_activity("Initializing Chrome driver...")
+                try:
+                    from selenium import webdriver
+                    from selenium.webdriver.chrome.service import Service
+                    from webdriver_manager.chrome import ChromeDriverManager
+                    
+                    options = webdriver.ChromeOptions()
+                    options.add_argument('--ignore-certificate-errors')
+                    options.add_argument('--ignore-ssl-errors')
+                    options.add_experimental_option('excludeSwitches', ['enable-logging'])
+                    
+                    service = Service(ChromeDriverManager().install())
+                    worker.driver = webdriver.Chrome(service=service, options=options)
+                    self._log_activity("✓ Chrome driver initialized")
+                except Exception as e:
+                    self._log_activity(f"Failed to initialize browser: {str(e)}")
+                    messagebox.showerror("Error", f"Failed to initialize browser: {str(e)}", parent=self.window)
+                    return
+            
+            # Login using CDP authentication (same as Quick Connect)
+            try:
+                # Set authentication via CDP
+                self._log_activity(f"Setting up authentication for {ip}")
+                worker.driver.execute_cdp_cmd('Network.enable', {})
+                auth_header = 'Basic ' + base64.b64encode(f'{username}:{password}'.encode()).decode()
+                worker.driver.execute_cdp_cmd('Network.setExtraHTTPHeaders', {'headers': {'Authorization': auth_header}})
+                
+                # Navigate to main page first
+                url = f"http://{ip}"
+                self._log_activity(f"Navigating to {url}")
+                worker.driver.get(url)
+                time.sleep(2)
+                
+                # Check for and handle Cato Networks warning
+                worker.handle_cato_warning()
+                
+                self._log_activity(f"✓ Successfully authenticated to {ip}")
+                
+                # Navigate to status.xml to fetch AP information (same as Quick Connect)
+                try:
+                    status_url = f"http://{ip}/service/status.xml"
+                    self._log_activity(f"Fetching AP information from {status_url}")
+                    worker.driver.get(status_url)
+                    time.sleep(3)
+                    
+                    # Parse the information
+                    page_source = worker.driver.page_source
+                    self._log_activity(f"✓ AP information retrieved")
+                    
+                    # Extract and update AP info (you can expand this to update the display)
+                    # For now, just log success
+                    
+                except Exception as e:
+                    self._log_activity(f"⚠ Could not fetch status info: {str(e)}")
+                
+                self._log_activity(f"✓ Browser opened for {self.ap_id}")
+                self._enable_web_actions()
+                
+            except Exception as e:
+                self._log_activity(f"Authentication failed: {str(e)}")
+                messagebox.showerror("Error", f"Authentication failed: {str(e)}", parent=self.window)
+                return
+                
+        except Exception as e:
+            import traceback
+            error_detail = traceback.format_exc()
+            self._log_activity(f"✗ Error: {str(e)}")
+            messagebox.showerror("Browser Error", 
+                               f"Failed to open browser: {str(e)}\n\nDetails:\n{error_detail}", 
+                               parent=self.window)
     
     def _connect_ssh(self):
         """Connect via SSH (placeholder for future implementation)."""
@@ -824,27 +1260,31 @@ class APSupportWindow:
         self.current_note_id = note['id']
         
         # Header with note info
-        header = tk.Frame(self.note_window, bg="#F8F9FA", relief="solid", borderwidth=1)
+        header = tk.Frame(self.note_window, bg="#FFFFFF")
         header.pack(fill="x", padx=15, pady=15)
         
         tk.Label(header, text=f"Created: {note['created_at']}", 
-                font=("Segoe UI", 9), bg="#F8F9FA").pack(anchor="w", padx=15, pady=3)
+                font=("Segoe UI", 9), bg="#FFFFFF").pack(anchor="w", pady=2)
         tk.Label(header, text=f"By: {note['user']}", 
-                font=("Segoe UI", 9), bg="#F8F9FA").pack(anchor="w", padx=15, pady=3)
+                font=("Segoe UI", 9), bg="#FFFFFF").pack(anchor="w", pady=2)
         
         if note.get('updated_at') and note['updated_at'] != note['created_at']:
             tk.Label(header, text=f"Last edited: {note['updated_at']} by {note.get('updated_by', 'unknown')}", 
-                    font=("Segoe UI", 8, "italic"), fg="#888888", bg="#F8F9FA").pack(anchor="w", padx=15, pady=3)
+                    font=("Segoe UI", 8, "italic"), fg="#888888", bg="#FFFFFF").pack(anchor="w", pady=2)
+        
+        # Separator line
+        tk.Frame(self.note_window, bg="#CCCCCC", height=1).pack(fill="x", padx=15)
         
         # Headline
         headline_frame = tk.Frame(self.note_window, bg="#FFFFFF")
-        headline_frame.pack(fill="x", padx=15, pady=(0, 10))
+        headline_frame.pack(fill="x", padx=15, pady=(10, 10))
         
         tk.Label(headline_frame, text="Headline:", font=("Segoe UI", 10, "bold"), 
                 bg="#FFFFFF").pack(anchor="w", pady=(0, 5))
         self.note_window_headline = tk.Entry(headline_frame, font=("Segoe UI", 10), 
-                                             relief="solid", borderwidth=1)
-        self.note_window_headline.pack(fill="x")
+                                             relief="flat", borderwidth=0, highlightthickness=1,
+                                             highlightbackground="#CCCCCC", highlightcolor="#007BFF")
+        self.note_window_headline.pack(fill="x", ipady=5)
         self.note_window_headline.insert(0, note['headline'])
         
         # Check if this is the user's note and latest
@@ -855,6 +1295,9 @@ class APSupportWindow:
         if not can_edit:
             self.note_window_headline.config(state="readonly")
         
+        # Separator line
+        tk.Frame(self.note_window, bg="#CCCCCC", height=1).pack(fill="x", padx=15, pady=(0, 10))
+        
         # Note content
         content_frame = tk.Frame(self.note_window, bg="#FFFFFF")
         content_frame.pack(fill="both", expand=True, padx=15)
@@ -862,8 +1305,10 @@ class APSupportWindow:
         tk.Label(content_frame, text="Note:", font=("Segoe UI", 10, "bold"), 
                 bg="#FFFFFF").pack(anchor="w", pady=(0, 5))
         self.note_window_text = scrolledtext.ScrolledText(content_frame, font=("Segoe UI", 10), 
-                                                          wrap=tk.WORD, height=12, relief="solid", 
-                                                          borderwidth=1)
+                                                          wrap=tk.WORD, height=12, relief="flat", 
+                                                          borderwidth=0, highlightthickness=1,
+                                                          highlightbackground="#CCCCCC", 
+                                                          highlightcolor="#007BFF")
         self.note_window_text.pack(fill="both", expand=True)
         self.note_window_text.insert("1.0", note['note'])
         
@@ -876,18 +1321,21 @@ class APSupportWindow:
             self.note_window_text.bind("<<Modified>>", on_modify)
             self.note_window_headline.bind("<KeyRelease>", on_modify)
         
+        # Separator line
+        tk.Frame(self.note_window, bg="#CCCCCC", height=1).pack(fill="x", padx=15, pady=(10, 0))
+        
         # Existing Replies section
         replies = self.db.get_note_replies(note['id'])
         if replies:
             replies_frame = tk.LabelFrame(self.note_window, text=f"Replies ({len(replies)})", 
                                          padx=10, pady=10, bg="#FFFFFF", 
-                                         font=("Segoe UI", 10, "bold"))
+                                         font=("Segoe UI", 10, "bold"), borderwidth=0)
             replies_frame.pack(fill="both", expand=True, padx=15, pady=(10, 0))
             
             # Create scrollable frame for replies
-            replies_canvas = tk.Canvas(replies_frame, bg="#F8F9FA", highlightthickness=0, height=150)
+            replies_canvas = tk.Canvas(replies_frame, bg="#FFFFFF", highlightthickness=0, height=150)
             replies_scroll = ttk.Scrollbar(replies_frame, orient="vertical", command=replies_canvas.yview)
-            replies_container = tk.Frame(replies_canvas, bg="#F8F9FA")
+            replies_container = tk.Frame(replies_canvas, bg="#FFFFFF")
             
             replies_container.bind(
                 "<Configure>",
@@ -901,26 +1349,39 @@ class APSupportWindow:
             replies_scroll.pack(side="right", fill="y")
             
             # Display replies (newest first)
-            for reply in replies:
-                reply_box = tk.Frame(replies_container, bg="#FFFFFF", relief="solid", 
-                                    borderwidth=1, padx=10, pady=8)
-                reply_box.pack(fill="x", pady=5, padx=5)
+            for idx, reply in enumerate(replies):
+                reply_box = tk.Frame(replies_container, bg="#FFFFFF")
+                reply_box.pack(fill="x", padx=0, pady=0)
                 
-                tk.Label(reply_box, text=f"{reply['created_at']} - {reply['user']}", 
+                # Reply content with padding
+                content_frame = tk.Frame(reply_box, bg="#FFFFFF")
+                content_frame.pack(fill="x", padx=10, pady=8)
+                
+                tk.Label(content_frame, text=f"{reply['created_at']} - {reply['user']}", 
                         font=("Segoe UI", 8), fg="#888888", bg="#FFFFFF", anchor="w").pack(anchor="w")
-                tk.Label(reply_box, text=reply['reply_text'], 
+                tk.Label(content_frame, text=reply['reply_text'], 
                         font=("Segoe UI", 9), bg="#FFFFFF", anchor="w", justify="left",
-                        wraplength=550).pack(anchor="w", pady=(5, 0))
+                        wraplength=550).pack(anchor="w", pady=(5, 0), fill="x")
+                
+                # Add separator line after each reply except the last
+                if idx < len(replies) - 1:
+                    tk.Frame(reply_box, bg="#CCCCCC", height=1).pack(fill="x")
+        
+        # Separator line
+        tk.Frame(self.note_window, bg="#CCCCCC", height=1).pack(fill="x", padx=15, pady=(10, 0))
         
         # Add Reply section
         add_reply_frame = tk.LabelFrame(self.note_window, text="Add Reply", padx=15, pady=10,
-                                       bg="#FFFFFF", font=("Segoe UI", 10, "bold"))
+                                       bg="#FFFFFF", font=("Segoe UI", 10, "bold"), borderwidth=0)
         add_reply_frame.pack(fill="x", padx=15, pady=(10, 0))
         
         tk.Label(add_reply_frame, text="Reply:", bg="#FFFFFF", font=("Segoe UI", 9)).pack(anchor="w", pady=(0, 5))
         self.note_window_reply = scrolledtext.ScrolledText(add_reply_frame, height=4, 
                                                            font=("Segoe UI", 10), wrap=tk.WORD,
-                                                           relief="solid", borderwidth=1)
+                                                           relief="flat", borderwidth=0,
+                                                           highlightthickness=1,
+                                                           highlightbackground="#CCCCCC",
+                                                           highlightcolor="#007BFF")
         self.note_window_reply.pack(fill="x")
         
         # Buttons
