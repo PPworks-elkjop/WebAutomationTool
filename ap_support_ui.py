@@ -10,6 +10,7 @@ from database_manager import DatabaseManager
 from typing import Dict, List, Optional
 import io
 import base64
+import threading
 
 try:
     from PIL import Image, ImageTk
@@ -846,6 +847,10 @@ class APSupportWindow:
         # Track browser state
         self.browser_connected = False
         
+        # Track SSH state
+        self.ssh_connected = False
+        self.ssh_window_id = f"ap_{self.ap_id}"  # Unique ID for this AP's SSH window
+        
         # Vertical separator between Web and SSH
         separator = tk.Frame(connections_container, bg="#CCCCCC", width=1)
         separator.pack(side="left", fill="y", padx=10)
@@ -866,6 +871,32 @@ class APSupportWindow:
         tk.Label(ssh_icon_frame, text="SSH", font=("Segoe UI", 10, "bold"), 
                 bg=frame_bg, fg="#333333").pack(side="left")
         
+        # Spacer to push visibility icons to the right
+        tk.Frame(ssh_icon_frame, bg=frame_bg).pack(side="left", fill="x", expand=True)
+        
+        # SSH visibility icons (on same row as SSH heading)
+        # Show SSH terminal icon
+        show_ssh_icon = IconHelper.get_icon('visibility', size=20, color='#007BFF')
+        if show_ssh_icon:
+            self.show_ssh_btn = tk.Label(ssh_icon_frame, image=show_ssh_icon, bg=frame_bg, cursor="hand2")
+            self.show_ssh_btn.image = show_ssh_icon
+            self.show_ssh_btn.pack(side="left", padx=(0, 8))
+            self.show_ssh_btn.bind("<Button-1>", lambda e: self._show_ssh())
+            self._create_tooltip(self.show_ssh_btn, "Show SSH Terminal")
+            # Disable initially by making it transparent
+            self.show_ssh_enabled = False
+        
+        # Hide SSH terminal icon
+        hide_ssh_icon = IconHelper.get_icon('visibility_off', size=20, color='#6C757D')
+        if hide_ssh_icon:
+            self.hide_ssh_btn = tk.Label(ssh_icon_frame, image=hide_ssh_icon, bg=frame_bg, cursor="hand2")
+            self.hide_ssh_btn.image = hide_ssh_icon
+            self.hide_ssh_btn.pack(side="left")
+            self.hide_ssh_btn.bind("<Button-1>", lambda e: self._hide_ssh())
+            self._create_tooltip(self.hide_ssh_btn, "Hide SSH Terminal")
+            # Disable initially by making it transparent
+            self.hide_ssh_enabled = False
+        
         ssh_frame = tk.Frame(ssh_header_frame, bg=frame_bg)
         ssh_frame.pack(fill="both", expand=True)
         
@@ -874,10 +905,13 @@ class APSupportWindow:
         
         self.ssh_action_var = tk.StringVar(value="Choose action")
         self.ssh_action_combo = ttk.Combobox(ssh_control_frame, textvariable=self.ssh_action_var,
-                                            state="disabled", width=25, font=("Segoe UI", 10), height=12)
+                                            state="readonly", width=25, font=("Segoe UI", 10), height=12)
         self.ssh_action_combo['values'] = (
             "Choose action",
-            "SSH Connection"
+            "Connect",
+            "Check available space",
+            "Remove old logfiles",
+            "Download log files"
         )
         self.ssh_action_combo.pack(side="left", fill="x", expand=True, padx=(0, 5), ipady=4)
         self.ssh_action_combo.bind("<<ComboboxSelected>>", self._on_ssh_action_change)
@@ -1366,6 +1400,10 @@ class APSupportWindow:
     def _run_ssh_action(self):
         """Execute the selected SSH action."""
         action = self.ssh_action_var.get()
+        
+        if action == "Choose action":
+            return
+        
         self._log_activity(f"Executing: {action}")
         
         # Log audit: SSH action
@@ -1378,7 +1416,14 @@ class APSupportWindow:
             details={'action': action}
         )
         
-        self._connect_ssh()
+        if action == "Connect":
+            self._connect_ssh()
+        elif action == "Check available space":
+            self._ssh_check_space()
+        elif action == "Remove old logfiles":
+            self._ssh_remove_old_logs()
+        elif action == "Download log files":
+            self._ssh_download_logs()
     
     def _handle_cato_warning(self):
         """Handle Cato Networks warning if present."""
@@ -1677,7 +1722,7 @@ class APSupportWindow:
     
     def _work_with_ssh(self):
         """Configure SSH settings in web UI."""
-        if not self.browser_connected:
+        if not self.browser_connected or not self.driver:
             messagebox.showwarning("Not Connected", "Please open Web UI first.", parent=self.window)
             return
         
@@ -1692,20 +1737,103 @@ class APSupportWindow:
         
         self._log_activity(f"Executing SSH action: {action}")
         
+        # Run in background thread
+        thread = threading.Thread(target=self._work_with_ssh_thread, args=(action,), daemon=True)
+        thread.start()
+    
+    def _work_with_ssh_thread(self, action):
+        """Background thread to manage SSH via browser."""
+        from selenium.webdriver.common.by import By
+        from selenium.webdriver.support.ui import WebDriverWait
+        from selenium.webdriver.support import expected_conditions as EC
+        import time
+        
         try:
-            worker = self.browser_helper.worker
-            result = worker.manage_ssh(action)
+            # Navigate to SSH page
+            ip_address = self.ap.get('ip_address', '')
+            self.driver.get(f"http://{ip_address}/service/config/ssh.xml")
+            time.sleep(3)
             
-            if result['status'] == 'success':
-                self._log_activity(f"✓ {result['message']}")
-                messagebox.showinfo("Success", result['message'], parent=self.window)
-            else:
-                self._log_activity(f"✗ {result['message']}")
-                messagebox.showerror("Error", result['message'], parent=self.window)
-                
+            # Try multiple strategies to find the SSH control elements
+            radio_clicked = False
+            
+            if action == "enable":
+                # Try different methods to find enable radio
+                try:
+                    # Method 1: By value attribute
+                    enable_radio = self.driver.find_element(By.XPATH, "//input[@type='radio' and @value='enable']")
+                    enable_radio.click()
+                    radio_clicked = True
+                except:
+                    try:
+                        # Method 2: By name and checking following text
+                        radios = self.driver.find_elements(By.XPATH, "//input[@type='radio' and @name='enabled']")
+                        for radio in radios:
+                            # Check if this is the enable option (usually first one or has id/value)
+                            if radio.get_attribute('value') in ['enable', 'true', '1'] or radios.index(radio) == 0:
+                                radio.click()
+                                radio_clicked = True
+                                break
+                    except:
+                        pass
+                        
+            elif action == "disable":
+                # Try different methods to find disable radio
+                try:
+                    # Method 1: By value attribute
+                    disable_radio = self.driver.find_element(By.XPATH, "//input[@type='radio' and @value='disable']")
+                    disable_radio.click()
+                    radio_clicked = True
+                except:
+                    try:
+                        # Method 2: By name and checking following text
+                        radios = self.driver.find_elements(By.XPATH, "//input[@type='radio' and @name='enabled']")
+                        for radio in radios:
+                            # Check if this is the disable option (usually second one or has specific value)
+                            if radio.get_attribute('value') in ['disable', 'false', '0'] or radios.index(radio) == 1:
+                                radio.click()
+                                radio_clicked = True
+                                break
+                    except:
+                        pass
+            
+            if not radio_clicked:
+                raise Exception(f"Could not find radio button for '{action}'")
+            
+            time.sleep(1)
+            
+            # Find and click Apply/Submit button
+            button_clicked = False
+            try:
+                # Try finding submit button
+                buttons = self.driver.find_elements(By.XPATH, "//input[@type='submit'] | //input[@type='button'] | //button")
+                for button in buttons:
+                    value = button.get_attribute('value') or button.text
+                    if value and ('apply' in value.lower() or 'submit' in value.lower() or 'ok' in value.lower()):
+                        button.click()
+                        button_clicked = True
+                        break
+            except:
+                pass
+            
+            if not button_clicked:
+                raise Exception("Could not find Apply/Submit button")
+            
+            time.sleep(2)
+            
+            self.window.after(0, lambda: self._log_activity(f"✓ SSH {action}d successfully"))
+            self.window.after(0, lambda: messagebox.showinfo("Success", f"SSH {action}d successfully", parent=self.window))
+            
         except Exception as e:
-            self._log_activity(f"✗ Error: {str(e)}")
-            messagebox.showerror("Error", f"Failed to manage SSH: {str(e)}", parent=self.window)
+            error_msg = str(e)
+            # Simplify selenium stack trace errors
+            if "Stacktrace:" in error_msg:
+                error_msg = error_msg.split("Stacktrace:")[0].strip()
+            if not error_msg:
+                error_msg = "Could not locate SSH control elements on the page"
+            
+            self.window.after(0, lambda: self._log_activity(f"✗ Error: {error_msg}"))
+            self.window.after(0, lambda: messagebox.showerror("Error", f"Failed to manage SSH: {error_msg}", parent=self.window))
     
     def _do_software_update(self):
         """Perform software update."""
@@ -1877,8 +2005,391 @@ class APSupportWindow:
                                parent=self.window))
     
     def _connect_ssh(self):
-        """Connect via SSH (placeholder for future implementation)."""
-        messagebox.showinfo("Coming Soon", "SSH connection will be available in a future update.", parent=self.window)
+        """Connect via SSH in a separate thread."""
+        if self.ssh_connected:
+            # Already connected, just show window
+            self._show_ssh()
+            return
+        
+        # Check if we have SSH credentials
+        ip_address = self.ap.get('ip_address', '')
+        ssh_username = self.ap.get('username_ssh', '')
+        ssh_password = self.ap.get('password_ssh', '')
+        
+        if not ip_address:
+            messagebox.showerror("No IP Address", "No IP address available for SSH connection.", parent=self.window)
+            return
+        
+        if not ssh_username or not ssh_password:
+            messagebox.showerror("No SSH Credentials", 
+                               "SSH username or password not configured for this AP.", 
+                               parent=self.window)
+            return
+        
+        # Show connecting message
+        self.ssh_action_combo.config(state="disabled")
+        self.ssh_run_btn.config(state="disabled")
+        
+        # Connect in background thread
+        thread = threading.Thread(target=self._connect_ssh_thread, daemon=True)
+        thread.start()
+    
+    def _connect_ssh_thread(self):
+        """Background thread for SSH connection."""
+        from ssh_helper import SSHManager
+        
+        ip_address = self.ap.get('ip_address', '')
+        ssh_username = self.ap.get('username_ssh', '')
+        ssh_password = self.ap.get('password_ssh', '')
+        
+        # Attempt connection
+        success, message = SSHManager.open_ssh_connection(
+            parent=self.window,
+            ap_id=self.ap_id,
+            host=ip_address,
+            username=ssh_username,
+            password=ssh_password,
+            window_id=self.ssh_window_id
+        )
+        
+        # Update UI on main thread
+        self.window.after(0, lambda: self._on_ssh_connected(success, message))
+    
+    def _on_ssh_connected(self, success: bool, message: str):
+        """Handle SSH connection result (runs on main thread)."""
+        if success:
+            self.ssh_connected = True
+            self._enable_ssh_actions()
+            
+            # Log audit
+            self.db.log_user_activity(
+                username=self.current_user,
+                activity_type='ap_ssh_connect',
+                description=f'Connected to SSH: {self.ap.get("ip_address")}',
+                ap_id=self.ap_id,
+                success=True
+            )
+        else:
+            messagebox.showerror("SSH Connection Failed", message, parent=self.window)
+            self.ssh_action_combo.config(state="readonly")
+            self.ssh_run_btn.config(state="normal")
+            
+            # Log audit
+            self.db.log_user_activity(
+                username=self.current_user,
+                activity_type='ap_ssh_connect',
+                description=f'SSH connection failed: {message}',
+                ap_id=self.ap_id,
+                success=False
+            )
+    
+    def _enable_ssh_actions(self):
+        """Enable SSH controls after successful connection."""
+        self.ssh_action_combo.config(state="readonly")
+        self.ssh_run_btn.config(state="normal")
+        
+        # Enable visibility icons
+        self.show_ssh_enabled = True
+        self.hide_ssh_enabled = True
+        
+        # Update icon colors
+        show_icon = IconHelper.get_icon('visibility', size=20, color='#28A745')  # Green
+        if show_icon:
+            self.show_ssh_btn.config(image=show_icon)
+            self.show_ssh_btn.image = show_icon
+        
+        hide_icon = IconHelper.get_icon('visibility_off', size=20, color='#007BFF')  # Blue
+        if hide_icon:
+            self.hide_ssh_btn.config(image=hide_icon)
+            self.hide_ssh_btn.image = hide_icon
+    
+    def _show_ssh(self):
+        """Show the SSH terminal window."""
+        if not self.show_ssh_enabled:
+            return
+        
+        from ssh_helper import SSHManager
+        
+        # Show the window if it exists
+        if self.ssh_window_id in SSHManager._windows:
+            window = SSHManager._windows[self.ssh_window_id]
+            window.show()
+    
+    def _hide_ssh(self):
+        """Hide/minimize the SSH terminal window."""
+        if not self.hide_ssh_enabled:
+            return
+        
+        from ssh_helper import SSHManager
+        
+        # Minimize the window if it exists
+        if self.ssh_window_id in SSHManager._windows:
+            window = SSHManager._windows[self.ssh_window_id]
+            window.window.iconify()
+    
+    def _ssh_check_space(self):
+        """Check available space on the AP via SSH."""
+        if not self.ssh_connected:
+            # Need to connect first
+            messagebox.showinfo("Connect First", "Please connect to SSH first.", parent=self.window)
+            return
+        
+        # Run in background thread
+        thread = threading.Thread(target=self._ssh_check_space_thread, daemon=True)
+        thread.start()
+    
+    def _ssh_check_space_thread(self):
+        """Background thread to check disk space."""
+        from ssh_helper import SSHManager
+        import time
+        
+        if self.ssh_window_id not in SSHManager._windows:
+            return
+        
+        window = SSHManager._windows[self.ssh_window_id]
+        if self.ap_id not in window.tabs:
+            return
+        
+        tab = window.tabs[self.ap_id]
+        connection = tab.connection
+        
+        if not connection.connected:
+            return
+        
+        # Try to run df -h command
+        connection.send_command("df -h")
+        time.sleep(3)
+        
+        # Get output from automation buffer and check if we're in service mode
+        output = connection.get_automation_output(1000)
+        
+        # Check if command failed due to service mode
+        if "unknown command" in output.lower() or ("fail" in output.lower() and "servicemode>" in output.lower()):
+            self.window.after(0, lambda: self._log_activity("⚠️ Service mode detected, exiting and retrying..."))
+            
+            # Exit service mode and retry
+            if not self._ssh_exit_service_mode_if_needed_v2(connection):
+                self.window.after(0, lambda: self._log_activity("✗ Failed to exit service mode"))
+                return
+            
+            # Retry the command
+            time.sleep(2)
+            connection.send_command("df -h")
+            time.sleep(3)
+            output = connection.get_automation_output(1000)
+        
+        # Log to activity
+        self.window.after(0, lambda o=output: self._log_activity(f"Disk space check:\n{o}"))
+    
+    def _ssh_remove_old_logs(self):
+        """Remove old log files from the AP via SSH."""
+        if not self.ssh_connected:
+            messagebox.showinfo("Connect First", "Please connect to SSH first.", parent=self.window)
+            return
+        
+        # Confirm action
+        if not messagebox.askyesno("Confirm", 
+                                   "This will remove old log files (matching *20*log*).\n\nContinue?",
+                                   parent=self.window):
+            return
+        
+        # Run in background thread
+        thread = threading.Thread(target=self._ssh_remove_old_logs_thread, daemon=True)
+        thread.start()
+    
+    def _ssh_remove_old_logs_thread(self):
+        """Background thread to remove old log files."""
+        from ssh_helper import SSHManager
+        import time
+        
+        if self.ssh_window_id not in SSHManager._windows:
+            return
+        
+        window = SSHManager._windows[self.ssh_window_id]
+        if self.ap_id not in window.tabs:
+            return
+        
+        tab = window.tabs[self.ap_id]
+        connection = tab.connection
+        
+        if not connection.connected:
+            return
+        
+        # Check if in service mode and exit if needed
+        if not self._ssh_exit_service_mode_if_needed(connection):
+            self.window.after(0, lambda: self._log_activity("✗ Failed to exit service mode"))
+            return
+        
+        # Check space before
+        time.sleep(1)
+        connection.send_command("df -h")
+        time.sleep(2)
+        before_output = connection.get_output()
+        self.window.after(0, lambda: self._log_activity(f"Space before cleanup:\n{before_output}"))
+        
+        # Navigate to log folder
+        time.sleep(0.5)
+        connection.send_command("cd /opt/esl/accesspoint")
+        time.sleep(1)
+        
+        # Remove old log files
+        connection.send_command("rm -rf *20*log*")
+        time.sleep(2)
+        
+        # Check space after
+        connection.send_command("df -h")
+        time.sleep(2)
+        after_output = connection.get_output()
+        self.window.after(0, lambda: self._log_activity(f"Space after cleanup:\n{after_output}"))
+        self.window.after(0, lambda: self._log_activity("✓ Old log files removed"))
+    
+    def _ssh_download_logs(self):
+        """Download log files from the AP via SCP."""
+        if not self.ssh_connected:
+            messagebox.showinfo("Connect First", "Please connect to SSH first.", parent=self.window)
+            return
+        
+        # Ask user for destination folder
+        from tkinter import filedialog
+        dest_folder = filedialog.askdirectory(title="Select destination folder for log files", parent=self.window)
+        
+        if not dest_folder:
+            return
+        
+        self._log_activity(f"Downloading logs to: {dest_folder}")
+        
+        # Run in background thread
+        thread = threading.Thread(target=self._ssh_download_logs_thread, args=(dest_folder,), daemon=True)
+        thread.start()
+    
+    def _ssh_download_logs_thread(self, dest_folder):
+        """Background thread to download log files via SCP."""
+        from ssh_helper import SSHManager
+        import paramiko
+        import os
+        import time
+        
+        if self.ssh_window_id not in SSHManager._windows:
+            return
+        
+        window = SSHManager._windows[self.ssh_window_id]
+        if self.ap_id not in window.tabs:
+            return
+        
+        tab = window.tabs[self.ap_id]
+        connection = tab.connection
+        
+        if not connection.connected:
+            return
+        
+        # Check if in service mode and exit if needed
+        if not self._ssh_exit_service_mode_if_needed(connection):
+            self.window.after(0, lambda: self._log_activity("✗ Failed to exit service mode"))
+            return
+        
+        # Navigate to log folder and list files
+        time.sleep(1)
+        connection.send_command("cd /opt/esl/accesspoint")
+        time.sleep(1)
+        connection.send_command("ls -la *20*log* 2>/dev/null || echo 'No log files found'")
+        time.sleep(2)
+        
+        # Get file list
+        output = connection.get_output()
+        self.window.after(0, lambda: self._log_activity(f"Log files found:\n{output}"))
+        
+        # Use SCP to download files
+        try:
+            # Create SCP client using existing SSH connection
+            scp_client = paramiko.SFTPClient.from_transport(connection.client.get_transport())
+            
+            # Get list of files matching pattern
+            remote_path = "/opt/esl/accesspoint"
+            try:
+                files = scp_client.listdir(remote_path)
+                log_files = [f for f in files if '20' in f and 'log' in f.lower()]
+                
+                if not log_files:
+                    self.window.after(0, lambda: self._log_activity("No log files found to download"))
+                    return
+                
+                # Download each file
+                for filename in log_files:
+                    remote_file = f"{remote_path}/{filename}"
+                    local_file = os.path.join(dest_folder, filename)
+                    
+                    self.window.after(0, lambda f=filename: self._log_activity(f"Downloading: {f}"))
+                    scp_client.get(remote_file, local_file)
+                    self.window.after(0, lambda f=filename: self._log_activity(f"✓ Downloaded: {f}"))
+                
+                self.window.after(0, lambda: self._log_activity(f"✓ All log files downloaded to {dest_folder}"))
+                
+            finally:
+                scp_client.close()
+                
+        except Exception as e:
+            self.window.after(0, lambda: self._log_activity(f"✗ Error downloading logs: {str(e)}"))
+    
+    def _ssh_exit_service_mode_if_needed(self, connection):
+        """Exit service mode if currently in it. Returns True if ready to execute commands."""
+        import time
+        
+        # Peek at recent output to check current prompt
+        time.sleep(1)
+        output = connection.peek_output(500)
+        
+        # Log what we see for debugging
+        self.window.after(0, lambda o=output: self._log_activity(f"Checking prompt. Last output: {repr(o[-100:])}"))
+        
+        # Check if in service mode (case insensitive)
+        if "servicemode>" in output.lower():
+            return self._ssh_exit_service_mode_if_needed_v2(connection)
+        
+        # Not in service mode, ready to execute
+        self.window.after(0, lambda: self._log_activity("✓ Normal shell mode detected"))
+        return True
+    
+    def _ssh_exit_service_mode_if_needed_v2(self, connection):
+        """Actually exit service mode. Returns True if successful."""
+        import time
+        
+        self.window.after(0, lambda: self._log_activity("⚠️ Exiting service mode..."))
+        
+        # Exit service mode
+        connection.send_command("extended matex2010")
+        time.sleep(2)
+        connection.send_command("enableshell true")
+        time.sleep(2)
+        connection.send_command("exit")
+        time.sleep(2)
+        connection.send_command("exit")
+        time.sleep(3)
+        
+        # Reconnect
+        self.window.after(0, lambda: self._log_activity("Reconnecting..."))
+        
+        # Set reconnecting flag on terminal tab to preserve output
+        tab = self.ssh_manager.get_tab(self.window_id, self.ap_id)
+        if tab:
+            tab.is_reconnecting = True
+        
+        # Disconnect current connection (preserve buffers)
+        connection.disconnect(preserve_buffers=True)
+        time.sleep(1)
+        
+        # Reconnect
+        success, message = connection.connect()
+        
+        if tab:
+            tab.is_reconnecting = False
+        
+        if success:
+            time.sleep(3)
+            self.window.after(0, lambda: self._log_activity("✓ Reconnected in normal mode"))
+            return True
+        else:
+            self.window.after(0, lambda: self._log_activity(f"✗ Reconnection failed: {message}"))
+            return False
     
     def _open_another_ap(self):
         """Open the AP search dialog to open another AP support window."""
@@ -2628,6 +3139,15 @@ class APSupportWindow:
             try:
                 self.driver.quit()
                 self._log_activity("✓ Browser closed")
+            except:
+                pass
+        
+        # Close SSH if connected
+        if self.ssh_connected:
+            try:
+                from ssh_helper import SSHManager
+                SSHManager.close_window(self.ssh_window_id)
+                self._log_activity("✓ SSH closed")
             except:
                 pass
         
