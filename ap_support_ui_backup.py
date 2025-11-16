@@ -13,15 +13,6 @@ import base64
 import threading
 from jira_search_ui import open_jira_search
 
-# Import modern version
-try:
-    from ap_support_ui_v3 import APSupportWindowModern
-    MODERN_UI_AVAILABLE = True
-    print("✓ Modern UI loaded successfully")
-except ImportError as e:
-    MODERN_UI_AVAILABLE = False
-    print(f"✗ Modern UI not available: {e}")
-
 try:
     from PIL import Image, ImageTk
     PIL_AVAILABLE = True
@@ -2437,16 +2428,9 @@ class APSupportWindow:
         
         # Define callback for when AP is selected
         def on_ap_selected(selected_ap):
-            # Open new support window with modern UI if available
-            if MODERN_UI_AVAILABLE:
-                print(f"Opening modern UI for AP {selected_ap['ap_id']}")
-                APSupportWindowModern(self.window, selected_ap, self.current_user, 
-                                    self.db, self.browser_helper)
-            else:
-                print(f"Opening classic UI for AP {selected_ap['ap_id']} (modern not available)")
-                # Fallback to classic UI
-                APSupportWindow(self.window, selected_ap, self.current_user, 
-                              self.db, self.browser_helper)
+            # Open new support window (will check if already open)
+            APSupportWindow(self.window, selected_ap, self.current_user, 
+                          self.db, self.browser_helper)
         
         # Open search dialog with callback
         search_dialog = APSearchDialog(self.window, self.current_user, self.db, on_select_callback=on_ap_selected)

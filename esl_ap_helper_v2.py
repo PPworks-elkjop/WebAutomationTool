@@ -2464,7 +2464,7 @@ class App:
         
         # Settings Group
         settings_group = ttk.LabelFrame(ops_frame, text="Settings", padding=10, style="Modern.TLabelframe")
-        settings_group.grid(row=0, column=1, sticky="w")
+        settings_group.grid(row=0, column=1, sticky="w", padx=(0, 10))
         
         self.credentials_btn = tk.Button(settings_group, text="Manage AP Credentials", 
                                          command=self._on_manage_credentials,
@@ -2496,29 +2496,6 @@ class App:
                                      cursor="hand2")
         self.support_btn.pack(side="left", padx=(0, 5))
         
-        # Admin-only: Audit Log button
-        if self.current_user['role'] == 'admin':
-            self.audit_log_btn = tk.Button(settings_group, text="📋 Audit Log", 
-                                          command=self._on_audit_log,
-                                          font=("Segoe UI", 10),
-                                          bg="#6C757D", fg="white",
-                                          activebackground="#5A6268",
-                                          relief="flat", bd=0,
-                                          padx=15, pady=8,
-                                          cursor="hand2")
-            self.audit_log_btn.pack(side="left", padx=(0, 5))
-            
-            # Admin Settings button (API integrations)
-            self.admin_settings_btn = tk.Button(settings_group, text="⚙️ Admin Settings", 
-                                               command=self._on_admin_settings,
-                                               font=("Segoe UI", 10),
-                                               bg="#6C757D", fg="white",
-                                               activebackground="#5A6268",
-                                               relief="flat", bd=0,
-                                               padx=15, pady=8,
-                                               cursor="hand2")
-            self.admin_settings_btn.pack(side="left", padx=(0, 5))
-        
         self.about_btn = tk.Button(settings_group, text="About", 
                                    command=self._show_about,
                                    font=("Segoe UI", 10),
@@ -2529,9 +2506,37 @@ class App:
                                    cursor="hand2")
         self.about_btn.pack(side="left")
         
+        # Administration Group (Admin-only)
+        is_admin = (self.current_user.get('is_admin') or 
+                   (self.current_user.get('role', '').lower() == 'admin'))
+        
+        if is_admin:
+            admin_group = ttk.LabelFrame(ops_frame, text="Administration", padding=10, style="Modern.TLabelframe")
+            admin_group.grid(row=0, column=2, sticky="w", padx=(0, 10))
+            
+            self.audit_log_btn = tk.Button(admin_group, text="📋 Audit Log", 
+                                          command=self._on_audit_log,
+                                          font=("Segoe UI", 10),
+                                          bg="#6C757D", fg="white",
+                                          activebackground="#5A6268",
+                                          relief="flat", bd=0,
+                                          padx=15, pady=8,
+                                          cursor="hand2")
+            self.audit_log_btn.pack(side="left", padx=(0, 5))
+            
+            self.admin_settings_btn = tk.Button(admin_group, text="⚙️ Admin Settings", 
+                                               command=self._on_admin_settings,
+                                               font=("Segoe UI", 10),
+                                               bg="#6C757D", fg="white",
+                                               activebackground="#5A6268",
+                                               relief="flat", bd=0,
+                                               padx=15, pady=8,
+                                               cursor="hand2")
+            self.admin_settings_btn.pack(side="left")
+        
         # Exit Program button with spacing label for alignment
         exit_group = ttk.LabelFrame(ops_frame, text=" ", padding=10, style="Modern.TLabelframe")
-        exit_group.grid(row=0, column=2, sticky="e")
+        exit_group.grid(row=0, column=3, sticky="e")
         
         self.exit_btn = tk.Button(exit_group, text="Exit Program", 
                                   command=self._on_exit_program,
@@ -2546,7 +2551,8 @@ class App:
         # Configure column weights
         ops_frame.columnconfigure(0, weight=0)
         ops_frame.columnconfigure(1, weight=0)
-        ops_frame.columnconfigure(2, weight=1)
+        ops_frame.columnconfigure(2, weight=0)
+        ops_frame.columnconfigure(3, weight=1)
         
         # Progress Frame
         progress_frame = ttk.Frame(main_frame, style="Modern.TFrame")
@@ -3519,10 +3525,12 @@ class App:
     
     def _on_audit_log(self):
         """Open the audit log window (Admin only)."""
-        from user_manager_gui_v2 import AuditLogWindow
+        from user_manager_gui_v2 import AuditLogViewer
         
         # Verify admin status
-        if self.current_user['role'] != 'admin':
+        is_admin = (self.current_user.get('is_admin') or 
+                   (self.current_user.get('role', '').lower() == 'admin'))
+        if not is_admin:
             messagebox.showerror("Access Denied", "Only administrators can view audit logs")
             return
         
@@ -3534,7 +3542,7 @@ class App:
         )
         
         try:
-            AuditLogWindow(self.root, self.user_manager)
+            AuditLogViewer(self.root, self.user_manager)
             self._log_activity("Audit log opened")
         except Exception as e:
             messagebox.showerror("Error", f"Failed to open audit log: {e}")
@@ -3545,7 +3553,9 @@ class App:
         from database_manager import DatabaseManager
         
         # Verify admin status
-        if self.current_user['role'] != 'admin':
+        is_admin = (self.current_user.get('is_admin') or 
+                   (self.current_user.get('role', '').lower() == 'admin'))
+        if not is_admin:
             messagebox.showerror("Access Denied", "Only administrators can access admin settings")
             return
         
@@ -3565,8 +3575,12 @@ class App:
     
     def _on_ap_support(self):
         """Open the AP Support system."""
-        from ap_support_ui import APSearchDialog, APSupportWindow
+        from ap_support_ui import APSearchDialog, APSupportWindow, MODERN_UI_AVAILABLE
         from database_manager import DatabaseManager
+        
+        # Import modern UI if available
+        if MODERN_UI_AVAILABLE:
+            from ap_support_ui_v3 import APSupportWindowModern
         
         # Log activity
         self.user_manager.log_activity(
@@ -3583,8 +3597,15 @@ class App:
             # If an AP was selected, open support window
             selected_ap = search_dialog.get_selected_ap()
             if selected_ap:
-                APSupportWindow(self.root, selected_ap, self.current_user['username'], 
-                              DatabaseManager(), browser_helper=self)
+                # Use modern UI if available
+                if MODERN_UI_AVAILABLE:
+                    print(f"Opening modern UI for AP {selected_ap['ap_id']} from main app")
+                    APSupportWindowModern(self.root, selected_ap, self.current_user['username'], 
+                                  DatabaseManager(), browser_helper=self)
+                else:
+                    print(f"Opening classic UI for AP {selected_ap['ap_id']} from main app")
+                    APSupportWindow(self.root, selected_ap, self.current_user['username'], 
+                                  DatabaseManager(), browser_helper=self)
                 self._log_activity(f"Opened support window for AP: {selected_ap['ap_id']}")
         except Exception as e:
             import traceback

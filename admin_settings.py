@@ -25,8 +25,10 @@ class AdminSettingsDialog:
         self.current_user = current_user
         self.db = db_manager
         
-        # Check if user is admin
-        if not current_user.get('is_admin'):
+        # Check if user is admin (case-insensitive)
+        is_admin = (current_user.get('is_admin') or 
+                   (current_user.get('role', '').lower() == 'admin'))
+        if not is_admin:
             messagebox.showerror("Access Denied", "Only administrators can access this section.")
             return
         
@@ -225,16 +227,40 @@ class AdminSettingsDialog:
             cursor="hand2"
         ).pack(anchor="w", pady=(2, 0))
         
-        # Show/Hide token button
+        # Show/Hide token button (only visible when entering new token)
         self.jira_show_token = tk.BooleanVar(value=False)
-        tk.Checkbutton(
+        self.jira_show_token_check = tk.Checkbutton(
             token_frame,
             text="Show API Token",
             variable=self.jira_show_token,
             command=self._toggle_jira_token_visibility,
             bg="white",
             font=("Segoe UI", 9)
-        ).pack(anchor="w", pady=(5, 0))
+        )
+        self.jira_show_token_check.pack(anchor="w", pady=(5, 0))
+        
+        # SSL Verification option
+        ssl_frame = tk.Frame(main_frame, bg="white")
+        ssl_frame.pack(fill="x", pady=(0, 15))
+        
+        self.jira_verify_ssl = tk.BooleanVar(value=True)
+        tk.Checkbutton(
+            ssl_frame,
+            text="Verify SSL Certificate (uncheck if using corporate proxy with self-signed certificate)",
+            variable=self.jira_verify_ssl,
+            bg="white",
+            font=("Segoe UI", 9)
+        ).pack(anchor="w")
+        
+        tk.Label(
+            ssl_frame,
+            text="⚠️ Warning: Disabling SSL verification reduces security. Only use in trusted corporate networks.",
+            font=("Segoe UI", 8),
+            bg="white",
+            fg="#DC3545",
+            wraplength=700,
+            justify="left"
+        ).pack(anchor="w", pady=(2, 0))
         
         # Status label
         self.jira_status_label = tk.Label(
@@ -342,20 +368,37 @@ class AdminSettingsDialog:
             self.jira_username_entry.delete(0, tk.END)
             self.jira_username_entry.insert(0, credentials.get('username', ''))
             
-            # Show masked token if it exists
+            # Show placeholder for existing token (never show actual saved token)
             if credentials.get('api_token'):
                 self.jira_token_entry.delete(0, tk.END)
-                self.jira_token_entry.insert(0, credentials.get('api_token', ''))
+                self.jira_token_entry.insert(0, '●●●●●●●●●●●●●●●●●●●●')
+                self.jira_token_entry.config(state='disabled')  # Disable editing
+                
+                # Hide the show/hide checkbox when token is loaded from database
+                self.jira_show_token_check.pack_forget()
+                
                 self.jira_status_label.config(
-                    text="✓ Credentials loaded (encrypted)",
+                    text="✓ Credentials loaded (encrypted) - To change token, clear credentials first",
                     fg="#28A745"
                 )
+            
+            # Load SSL verification setting
+            self.jira_verify_ssl.set(credentials.get('verify_ssl', True))
     
     def _save_jira_credentials(self):
         """Save Jira credentials (encrypted)."""
         url = self.jira_url_entry.get().strip()
         username = self.jira_username_entry.get().strip()
         api_token = self.jira_token_entry.get().strip()
+        
+        # Check if token is the masked placeholder (already saved)
+        if api_token == '●●●●●●●●●●●●●●●●●●●●':
+            messagebox.showinfo(
+                "Already Saved",
+                "These credentials are already saved.\n\nTo update them, please clear credentials first.",
+                parent=self.dialog
+            )
+            return
         
         if not url or not username or not api_token:
             messagebox.showwarning(
@@ -379,19 +422,30 @@ class AdminSettingsDialog:
             credentials = {
                 'url': url,
                 'username': username,
-                'api_token': api_token
+                'api_token': api_token,
+                'verify_ssl': self.jira_verify_ssl.get()
             }
             
             self.credentials_manager.store_credentials('jira', credentials)
             
+            # After saving, mask the token and disable editing
+            self.jira_token_entry.config(state='normal')
+            self.jira_token_entry.delete(0, tk.END)
+            self.jira_token_entry.insert(0, '●●●●●●●●●●●●●●●●●●●●')
+            self.jira_token_entry.config(state='disabled')
+            
+            # Hide the show/hide checkbox
+            self.jira_show_token.set(False)
+            self.jira_show_token_check.pack_forget()
+            
             self.jira_status_label.config(
-                text="✓ Credentials saved successfully (encrypted in database)",
+                text="✓ Credentials saved successfully (encrypted) - To change token, clear credentials first",
                 fg="#28A745"
             )
             
             messagebox.showinfo(
                 "Success",
-                "Jira credentials have been saved securely.",
+                "Jira credentials have been saved securely.\n\nNote: The API token is now encrypted and cannot be viewed again.",
                 parent=self.dialog
             )
             
@@ -412,6 +466,27 @@ class AdminSettingsDialog:
         username = self.jira_username_entry.get().strip()
         api_token = self.jira_token_entry.get().strip()
         
+        # Check if token is the masked placeholder
+        if api_token == '●●●●●●●●●●●●●●●●●●●●':
+            messagebox.showinfo(
+                "Test Existing Credentials",
+                "Testing connection with saved credentials...",
+                parent=self.dialog
+            )
+            # Load actual credentials from database
+            credentials = self.credentials_manager.get_credentials('jira')
+            if credentials:
+                url = credentials.get('url', url)
+                username = credentials.get('username', username)
+                api_token = credentials.get('api_token', '')
+            else:
+                messagebox.showerror(
+                    "Error",
+                    "No saved credentials found. Please clear and re-enter credentials.",
+                    parent=self.dialog
+                )
+                return
+        
         if not url or not username or not api_token:
             messagebox.showwarning(
                 "Missing Information",
@@ -429,7 +504,8 @@ class AdminSettingsDialog:
             temp_credentials = {
                 'url': url,
                 'username': username,
-                'api_token': api_token
+                'api_token': api_token,
+                'verify_ssl': self.jira_verify_ssl.get()
             }
             self.credentials_manager.store_credentials('jira', temp_credentials)
             
@@ -452,11 +528,9 @@ class AdminSettingsDialog:
                     text=f"✗ Connection failed: {message}",
                     fg="#DC3545"
                 )
-                messagebox.showerror(
-                    "Connection Failed",
-                    f"Could not connect to Jira:\n\n{message}",
-                    parent=self.dialog
-                )
+                # Show error in a dialog with copyable text
+                self._show_error_dialog("Connection Failed", 
+                                       f"Could not connect to Jira:\n\n{message}")
                 
         except Exception as e:
             self.jira_status_label.config(
@@ -482,7 +556,11 @@ class AdminSettingsDialog:
                 # Clear entry fields
                 self.jira_url_entry.delete(0, tk.END)
                 self.jira_username_entry.delete(0, tk.END)
+                
+                # Re-enable token entry and show checkbox
+                self.jira_token_entry.config(state='normal')
                 self.jira_token_entry.delete(0, tk.END)
+                self.jira_show_token_check.pack(anchor="w", pady=(5, 0))
                 
                 self.jira_status_label.config(
                     text="✓ Credentials cleared",
@@ -501,3 +579,92 @@ class AdminSettingsDialog:
                     f"Failed to clear credentials:\n{str(e)}",
                     parent=self.dialog
                 )
+    
+    def _show_error_dialog(self, title: str, message: str):
+        """Show error in a dialog with copyable text."""
+        error_dialog = tk.Toplevel(self.dialog)
+        error_dialog.title(title)
+        error_dialog.geometry("600x300")
+        error_dialog.configure(bg="white")
+        error_dialog.transient(self.dialog)
+        error_dialog.grab_set()
+        
+        # Center dialog
+        error_dialog.update_idletasks()
+        x = (error_dialog.winfo_screenwidth() // 2) - (300)
+        y = (error_dialog.winfo_screenheight() // 2) - (150)
+        error_dialog.geometry(f"600x300+{x}+{y}")
+        
+        # Header
+        header = tk.Frame(error_dialog, bg="#DC3545", height=50)
+        header.pack(fill="x")
+        header.pack_propagate(False)
+        
+        tk.Label(
+            header,
+            text=f"✗ {title}",
+            font=("Segoe UI", 12, "bold"),
+            bg="#DC3545",
+            fg="white"
+        ).pack(pady=15)
+        
+        # Message area (scrollable text)
+        text_frame = tk.Frame(error_dialog, bg="white")
+        text_frame.pack(fill="both", expand=True, padx=20, pady=20)
+        
+        text_widget = tk.Text(
+            text_frame,
+            wrap="word",
+            font=("Consolas", 9),
+            bg="#F8F9FA",
+            relief="solid",
+            bd=1,
+            padx=10,
+            pady=10
+        )
+        text_widget.pack(side="left", fill="both", expand=True)
+        
+        scrollbar = tk.Scrollbar(text_frame, command=text_widget.yview)
+        scrollbar.pack(side="right", fill="y")
+        text_widget.config(yscrollcommand=scrollbar.set)
+        
+        # Insert message
+        text_widget.insert("1.0", message)
+        text_widget.config(state="disabled")  # Make read-only
+        
+        # Buttons
+        button_frame = tk.Frame(error_dialog, bg="white")
+        button_frame.pack(fill="x", padx=20, pady=(0, 20))
+        
+        def copy_to_clipboard():
+            error_dialog.clipboard_clear()
+            error_dialog.clipboard_append(message)
+            copy_btn.config(text="✓ Copied!", bg="#28A745")
+            error_dialog.after(2000, lambda: copy_btn.config(text="Copy to Clipboard", bg="#007BFF"))
+        
+        copy_btn = tk.Button(
+            button_frame,
+            text="Copy to Clipboard",
+            command=copy_to_clipboard,
+            bg="#007BFF",
+            fg="white",
+            font=("Segoe UI", 10, "bold"),
+            relief="flat",
+            cursor="hand2",
+            padx=20,
+            pady=8
+        )
+        copy_btn.pack(side="left", padx=(0, 10))
+        
+        tk.Button(
+            button_frame,
+            text="Close",
+            command=error_dialog.destroy,
+            bg="#6C757D",
+            fg="white",
+            font=("Segoe UI", 10),
+            relief="flat",
+            cursor="hand2",
+            padx=20,
+            pady=8
+        ).pack(side="left")

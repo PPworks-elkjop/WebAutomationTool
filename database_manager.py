@@ -675,6 +675,40 @@ class DatabaseManager:
                 'encryption': 'AES-256'
             }
     
+    def execute_query(self, query: str, params: tuple = None, fetch_one: bool = False):
+        """
+        Execute a SQL query and return results.
+        
+        Args:
+            query: SQL query string
+            params: Query parameters tuple
+            fetch_one: If True, return only first row
+            
+        Returns:
+            For SELECT: List of dicts or single dict if fetch_one=True
+            For INSERT/UPDATE/DELETE: None
+        """
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            
+            if params:
+                cursor.execute(query, params)
+            else:
+                cursor.execute(query)
+            
+            # Check if this is a SELECT query
+            if query.strip().upper().startswith('SELECT'):
+                if fetch_one:
+                    row = cursor.fetchone()
+                    return dict(row) if row else None
+                else:
+                    rows = cursor.fetchall()
+                    return [dict(row) for row in rows]
+            else:
+                # INSERT, UPDATE, DELETE - commit changes
+                conn.commit()
+                return None
+    
     def close(self):
         """Close database connection."""
         if hasattr(self._local, 'conn'):

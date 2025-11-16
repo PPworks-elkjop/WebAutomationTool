@@ -33,6 +33,7 @@ class JiraAPI:
             self._base_url = credentials.get('url', '').rstrip('/')
             username = credentials.get('username', '')
             api_token = credentials.get('api_token', '')
+            verify_ssl = credentials.get('verify_ssl', True)  # Default to True for security
             
             if self._base_url and username and api_token:
                 self._auth = HTTPBasicAuth(username, api_token)
@@ -42,6 +43,13 @@ class JiraAPI:
                     'Accept': 'application/json',
                     'Content-Type': 'application/json'
                 })
+                
+                # Disable SSL verification if configured (for corporate proxies)
+                if not verify_ssl:
+                    self._session.verify = False
+                    # Suppress only the single InsecureRequestWarning from urllib3
+                    import urllib3
+                    urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
     
     def is_configured(self) -> bool:
         """Check if Jira credentials are configured."""
@@ -57,6 +65,10 @@ class JiraAPI:
         if not self.is_configured():
             return False, "Jira credentials not configured"
         
+        # Debug output
+        print(f"DEBUG - Testing connection to: {self._base_url}/rest/api/3/myself")
+        print(f"DEBUG - Using username: {self._session.auth.username if self._session.auth else 'None'}")
+        
         try:
             response = self._session.get(f"{self._base_url}/rest/api/3/myself", timeout=10)
             
@@ -66,14 +78,16 @@ class JiraAPI:
             elif response.status_code == 401:
                 return False, "Authentication failed - check credentials"
             else:
-                return False, f"Connection failed: HTTP {response.status_code}"
+                return False, f"Connection failed: HTTP {response.status_code} - {response.text[:200]}"
                 
         except requests.exceptions.Timeout:
-            return False, "Connection timeout"
-        except requests.exceptions.ConnectionError:
-            return False, "Cannot connect to Jira server"
+            return False, f"Connection timeout - cannot reach {self._base_url}"
+        except requests.exceptions.ConnectionError as e:
+            return False, f"Cannot connect to Jira server at {self._base_url}. Error: {str(e)}"
+        except requests.exceptions.SSLError as e:
+            return False, f"SSL certificate error: {str(e)}"
         except Exception as e:
-            return False, f"Error: {str(e)}"
+            return False, f"Error: {type(e).__name__}: {str(e)}"
     
     def search_issues(self, jql: str, max_results: int = 50, fields: Optional[List[str]] = None) -> tuple[bool, List[Dict], str]:
         """
@@ -91,17 +105,24 @@ class JiraAPI:
             return False, [], "Jira not configured"
         
         try:
+            # The /rest/api/3/search/jql endpoint uses GET with query parameters
             params = {
                 'jql': jql,
-                'maxResults': max_results,
-                'startAt': 0
+                'maxResults': max_results
             }
             
             if fields:
                 params['fields'] = ','.join(fields)
+            else:
+                # Request common fields by default (new API returns only IDs without this)
+                # Include comment for internal notes and customer replies
+                params['fields'] = 'key,summary,status,issuetype,priority,created,updated,resolutiondate,creator,reporter,assignee,description,resolution,comment'
+            
+            # Use GET to /rest/api/3/search/jql endpoint
+            url = f"{self._base_url}/rest/api/3/search/jql"
             
             response = self._session.get(
-                f"{self._base_url}/rest/api/3/search",
+                url,
                 params=params,
                 timeout=30
             )
@@ -109,10 +130,18 @@ class JiraAPI:
             if response.status_code == 200:
                 data = response.json()
                 issues = data.get('issues', [])
-                total = data.get('total', 0)
-                return True, issues, f"Found {total} issue(s)"
+                is_last = data.get('isLast', True)
+                issue_count = len(issues)
+                
+                # Return the issues with a proper structure
+                result = {
+                    'issues': issues,
+                    'total': issue_count,  # We don't get total from API, just the count
+                    'isLast': is_last
+                }
+                return True, result, f"Found {issue_count} issue(s)"
             else:
-                return False, [], f"Search failed: HTTP {response.status_code}"
+                return False, {}, f"Search failed: HTTP {response.status_code}"
                 
         except Exception as e:
             return False, [], f"Error: {str(e)}"

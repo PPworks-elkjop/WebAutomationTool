@@ -51,8 +51,8 @@ class CredentialsManager:
             return ""
         
         fernet = Fernet(self._encryption_key)
-        encrypted = fernet.encrypt(data.encode())
-        return encrypted.decode()
+        encrypted = fernet.encrypt(data.encode('utf-8'))
+        return encrypted.decode('utf-8')
     
     def _decrypt(self, encrypted_data: str) -> str:
         """Decrypt data using Fernet encryption."""
@@ -61,8 +61,8 @@ class CredentialsManager:
         
         try:
             fernet = Fernet(self._encryption_key)
-            decrypted = fernet.decrypt(encrypted_data.encode())
-            return decrypted.decode()
+            decrypted = fernet.decrypt(encrypted_data.encode('utf-8'))
+            return decrypted.decode('utf-8')
         except Exception as e:
             print(f"Decryption error: {e}")
             return ""
