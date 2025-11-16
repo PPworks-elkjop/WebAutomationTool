@@ -2507,6 +2507,17 @@ class App:
                                           padx=15, pady=8,
                                           cursor="hand2")
             self.audit_log_btn.pack(side="left", padx=(0, 5))
+            
+            # Admin Settings button (API integrations)
+            self.admin_settings_btn = tk.Button(settings_group, text="⚙️ Admin Settings", 
+                                               command=self._on_admin_settings,
+                                               font=("Segoe UI", 10),
+                                               bg="#6C757D", fg="white",
+                                               activebackground="#5A6268",
+                                               relief="flat", bd=0,
+                                               padx=15, pady=8,
+                                               cursor="hand2")
+            self.admin_settings_btn.pack(side="left", padx=(0, 5))
         
         self.about_btn = tk.Button(settings_group, text="About", 
                                    command=self._show_about,
@@ -3527,6 +3538,30 @@ class App:
             self._log_activity("Audit log opened")
         except Exception as e:
             messagebox.showerror("Error", f"Failed to open audit log: {e}")
+    
+    def _on_admin_settings(self):
+        """Open the admin settings dialog (Admin only)."""
+        from admin_settings import AdminSettingsDialog
+        from database_manager import DatabaseManager
+        
+        # Verify admin status
+        if self.current_user['role'] != 'admin':
+            messagebox.showerror("Access Denied", "Only administrators can access admin settings")
+            return
+        
+        # Log activity
+        self.user_manager.log_activity(
+            username=self.current_user['username'],
+            activity_type='Admin Settings',
+            description='Opened admin settings dialog'
+        )
+        
+        try:
+            db = DatabaseManager()
+            AdminSettingsDialog(self.root, self.current_user, db)
+            self._log_activity("Admin settings opened")
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to open admin settings: {e}")
     
     def _on_ap_support(self):
         """Open the AP Support system."""

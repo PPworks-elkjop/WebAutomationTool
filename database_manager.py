@@ -317,6 +317,30 @@ class DatabaseManager:
                 )
             ''')
             
+            # System configuration - for storing encryption keys and system settings
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS system_config (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    config_key TEXT UNIQUE NOT NULL,
+                    config_value TEXT NOT NULL,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            ''')
+            
+            # API credentials - encrypted storage for external API credentials
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS api_credentials (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    service_name TEXT UNIQUE NOT NULL,  -- jira, vusion_cloud, etc.
+                    encrypted_data TEXT NOT NULL,  -- JSON encrypted with Fernet
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    created_by TEXT,  -- Admin who created it
+                    last_used TIMESTAMP  -- Last time credentials were used
+                )
+            ''')
+            
             # Create indexes for performance
             cursor.execute('CREATE INDEX IF NOT EXISTS idx_ap_store ON access_points(store_id)')
             cursor.execute('CREATE INDEX IF NOT EXISTS idx_ap_ip ON access_points(ip_address)')
@@ -338,6 +362,8 @@ class DatabaseManager:
             cursor.execute('CREATE INDEX IF NOT EXISTS idx_support_notes_ap ON support_notes(ap_id)')
             cursor.execute('CREATE INDEX IF NOT EXISTS idx_support_notes_created ON support_notes(created_at)')
             cursor.execute('CREATE INDEX IF NOT EXISTS idx_ap_support_status ON access_points(support_status)')
+            cursor.execute('CREATE INDEX IF NOT EXISTS idx_system_config_key ON system_config(config_key)')
+            cursor.execute('CREATE INDEX IF NOT EXISTS idx_api_credentials_service ON api_credentials(service_name)')
             
             conn.commit()
     
