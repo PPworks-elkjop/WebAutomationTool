@@ -18,12 +18,12 @@ class ActivityLogPanel:
     def _create_ui(self):
         """Create activity log UI."""
         # Header
-        header = tk.Frame(self.parent, bg="#0066CC", height=40)
+        header = tk.Frame(self.parent, bg="#4F7BA8", height=40)
         header.pack(fill=tk.X, side=tk.TOP)
         header.pack_propagate(False)
         
         tk.Label(header, text="Activity Log", font=('Segoe UI', 12, 'bold'),
-                bg="#0066CC", fg="white").pack(side=tk.LEFT, padx=15, pady=8)
+                bg="#4F7BA8", fg="white").pack(side=tk.LEFT, padx=15, pady=8)
         
         tk.Button(header, text="Clear", command=self._clear_log,
                  bg="#DC3545", fg="white", font=('Segoe UI', 8),
@@ -33,21 +33,25 @@ class ActivityLogPanel:
                  bg="#28A745", fg="white", font=('Segoe UI', 8),
                  padx=10, pady=2, relief=tk.FLAT, cursor="hand2").pack(side=tk.RIGHT, padx=5)
         
-        # Filter frame
-        filter_frame = tk.Frame(self.parent, bg="#F8F9FA", height=35)
+        # Filter frame with tab-like appearance
+        filter_frame = tk.Frame(self.parent, bg="#E9ECEF", height=36)
         filter_frame.pack(fill=tk.X)
         filter_frame.pack_propagate(False)
         
-        tk.Label(filter_frame, text="Filter:", font=('Segoe UI', 8),
-                bg="#F8F9FA", fg="#495057").pack(side=tk.LEFT, padx=10)
+        tk.Label(filter_frame, text="Filter:", font=('Segoe UI', 10),
+                bg="#E9ECEF", fg="#495057").pack(side=tk.LEFT, padx=15, pady=8)
         
-        self.filter_var = tk.StringVar(value="All")
-        filters = ["All", "Info", "Warning", "Error", "Success"]
+        # Create checkbox variables
+        self.filter_info = tk.BooleanVar(value=True)
+        self.filter_success = tk.BooleanVar(value=True)
+        self.filter_warning = tk.BooleanVar(value=True)
+        self.filter_error = tk.BooleanVar(value=True)
         
-        for f in filters:
-            tk.Radiobutton(filter_frame, text=f, variable=self.filter_var, value=f,
-                          font=('Segoe UI', 8), bg="#F8F9FA", command=self._apply_filter,
-                          activebackground="#E9ECEF").pack(side=tk.LEFT, padx=3)
+        # Create custom checkboxes
+        self._create_custom_checkbox(filter_frame, "Info", self.filter_info)
+        self._create_custom_checkbox(filter_frame, "Success", self.filter_success)
+        self._create_custom_checkbox(filter_frame, "Warning", self.filter_warning)
+        self._create_custom_checkbox(filter_frame, "Error", self.filter_error)
         
         # Log text area
         log_frame = tk.Frame(self.parent, bg="#FFFFFF")
@@ -69,6 +73,49 @@ class ActivityLogPanel:
         # Store all log entries
         self.log_entries = []
     
+    def _create_custom_checkbox(self, parent, text, variable):
+        """Create a custom styled checkbox matching the search panel."""
+        frame = tk.Frame(parent, bg="#E9ECEF", cursor="hand2")
+        frame.pack(side=tk.LEFT, padx=10)
+        
+        # Checkbox box
+        checkbox_canvas = tk.Canvas(frame, width=20, height=20, bg="#E9ECEF", 
+                                    highlightthickness=0, bd=0,
+                                    cursor="hand2")
+        checkbox_canvas.pack(side=tk.LEFT, padx=(0, 8))
+        
+        # Label
+        label = tk.Label(frame, text=text, font=('Segoe UI', 10), 
+                        bg="#E9ECEF", fg="#212529", cursor="hand2")
+        label.pack(side=tk.LEFT)
+        
+        def draw_checkbox():
+            """Draw the checkbox state."""
+            checkbox_canvas.delete("all")
+            if variable.get():
+                # Draw filled checkbox with checkmark
+                checkbox_canvas.create_rectangle(1, 1, 19, 19, fill="#4F7BA8", outline="#000000", width=1)
+                # Draw checkmark
+                checkbox_canvas.create_line(6, 10, 9, 14, fill="white", width=2)
+                checkbox_canvas.create_line(9, 14, 15, 6, fill="white", width=2)
+            else:
+                # Draw empty checkbox with black border
+                checkbox_canvas.create_rectangle(1, 1, 19, 19, fill="#FFFFFF", outline="#000000", width=1)
+        
+        def toggle():
+            """Toggle checkbox state and apply filter."""
+            variable.set(not variable.get())
+            draw_checkbox()
+            self._apply_filter()
+        
+        # Bind click events
+        checkbox_canvas.bind("<Button-1>", lambda e: toggle())
+        label.bind("<Button-1>", lambda e: toggle())
+        frame.bind("<Button-1>", lambda e: toggle())
+        
+        # Initial draw
+        draw_checkbox()
+    
     def log_message(self, source, message, level="info"):
         """Add a message to the activity log.
         
@@ -88,9 +135,8 @@ class ActivityLogPanel:
         }
         self.log_entries.append(entry)
         
-        # Check filter
-        filter_value = self.filter_var.get()
-        if filter_value != "All" and filter_value.lower() != level.lower():
+        # Check filter based on checkboxes
+        if not self._should_show_level(level):
             return
         
         # Format message
@@ -112,16 +158,27 @@ class ActivityLogPanel:
             if lines > 1000:
                 self.log_text.delete('1.0', '500.0')
     
+    def _should_show_level(self, level):
+        """Check if a log level should be shown based on checkboxes."""
+        level = level.lower()
+        if level == "info":
+            return self.filter_info.get()
+        elif level == "success":
+            return self.filter_success.get()
+        elif level == "warning":
+            return self.filter_warning.get()
+        elif level == "error":
+            return self.filter_error.get()
+        return True
+    
     def _apply_filter(self):
         """Apply current filter to log display."""
-        filter_value = self.filter_var.get()
-        
         # Clear display
         self.log_text.delete('1.0', tk.END)
         
         # Re-add filtered entries
         for entry in self.log_entries:
-            if filter_value == "All" or filter_value.lower() == entry['level'].lower():
+            if self._should_show_level(entry['level']):
                 self.log_text.insert(tk.END, f"[{entry['timestamp']}] ", "timestamp")
                 self.log_text.insert(tk.END, f"[{entry['source']}] ", "source")
                 self.log_text.insert(tk.END, f"{entry['message']}\n", entry['level'])

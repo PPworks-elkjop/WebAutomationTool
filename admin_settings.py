@@ -40,7 +40,6 @@ class AdminSettingsDialog:
         self.dialog.geometry("800x600")
         self.dialog.configure(bg="#F5F5F5")
         self.dialog.transient(parent)
-        self.dialog.grab_set()
         
         # Center dialog
         self.dialog.update_idletasks()
@@ -49,6 +48,13 @@ class AdminSettingsDialog:
         self.dialog.geometry(f"800x600+{x}+{y}")
         
         self._build_ui()
+        
+        # Set grab after UI is built and window is visible
+        try:
+            self.dialog.grab_set()
+        except tk.TclError:
+            # If grab fails, continue without it (window will still work)
+            pass
     
     def _build_ui(self):
         """Build the admin settings UI."""

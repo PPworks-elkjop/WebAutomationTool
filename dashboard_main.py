@@ -6,8 +6,11 @@ Main Dashboard Window for AP Helper v3
 import tkinter as tk
 from tkinter import ttk, messagebox, scrolledtext
 from datetime import datetime
+import json
+import os
 from database_manager import DatabaseManager
 from dashboard_components import APPanel, ContextPanel, ActivityLogPanel, ContentPanel
+from custom_notebook import CustomNotebook
 
 
 class DashboardMain:
@@ -20,76 +23,186 @@ class DashboardMain:
         
         # Window setup
         self.root.title("VERA - Vusion support with a human touch")
-        self.root.geometry("1600x900")
         self.root.configure(bg="#F0F0F0")
+        
+        # Load saved window geometry
+        self._load_window_geometry()
         
         # Shared state
         self.active_ap = None  # Currently active AP in AP panel
         self.active_ap_tab_index = None
+        self.active_dropdown = None  # Track active menu dropdown
         
-        # Style configuration for larger tabs
+        # Style configuration for larger tabs - must be done before creating widgets
         style = ttk.Style()
-        style.configure('Dashboard.TNotebook.Tab', font=('Segoe UI', 11), padding=[15, 8])
+        style.theme_use('default')  # Use default theme for better control
+        # Configure all notebook tabs globally with 15pt font
+        style.configure('TNotebook.Tab', 
+                       font=('Segoe UI', 15, 'normal'), 
+                       padding=[20, 14],
+                       background="#E9ECEF",
+                       foreground="#212529")
+        style.map('TNotebook.Tab',
+                 background=[('selected', '#FFFFFF')],
+                 foreground=[('selected', '#212529')],
+                 expand=[('selected', [1, 1, 1, 0])])
         
         # Create UI
         self._create_menu()
         self._create_top_banner()
-        self._create_dashboard()
+        self._create_layout()
         
         # Log startup
         self.activity_log.log_message("Dashboard", "Application started", "info")
         
         # Load admin notification if exists
         self._load_admin_notification()
+        
+        # Save window state on close
+        self.root.protocol("WM_DELETE_WINDOW", self._on_closing)
+        
+        # Load saved pane positions
+        self.root.after(100, self._load_pane_positions)
     
     def _create_menu(self):
-        """Create menu bar."""
-        menubar = tk.Menu(self.root)
-        self.root.config(menu=menubar)
+        """Create custom menu bar with buttons (modern styling with full control)."""
+        # Custom menu bar frame
+        menubar_frame = tk.Frame(self.root, bg="#FFFFFF", height=45, relief=tk.FLAT)
+        menubar_frame.pack(fill=tk.X, side=tk.TOP)
+        menubar_frame.pack_propagate(False)
+        
+        # Store active dropdown reference
+        self.active_dropdown = None
         
         # File Menu
-        file_menu = tk.Menu(menubar, tearoff=0)
-        menubar.add_cascade(label="File", menu=file_menu)
-        file_menu.add_command(label="Search AP", command=self._search_ap)
-        file_menu.add_separator()
-        file_menu.add_command(label="Exit", command=self._on_exit)
+        self._create_menu_button(menubar_frame, "File", [
+            ("Search AP", self._search_ap),
+            None,  # Separator
+            ("Exit", self._on_exit)
+        ])
         
         # Tools Menu
-        tools_menu = tk.Menu(menubar, tearoff=0)
-        menubar.add_cascade(label="Tools", menu=tools_menu)
-        tools_menu.add_command(label="Batch Ping", command=self._open_batch_ping)
-        tools_menu.add_command(label="Batch Browser Operations", command=self._open_batch_browser)
-        tools_menu.add_command(label="Batch SSH Operations", command=self._open_batch_ssh)
+        self._create_menu_button(menubar_frame, "Tools", [
+            ("Batch Ping", self._open_batch_ping),
+            ("Batch Browser Operations", self._open_batch_browser),
+            ("Batch SSH Operations", self._open_batch_ssh)
+        ])
         
         # Admin Menu
-        admin_menu = tk.Menu(menubar, tearoff=0)
-        menubar.add_cascade(label="Admin", menu=admin_menu)
-        admin_menu.add_command(label="Add New AP", command=self._add_new_ap)
-        admin_menu.add_separator()
-        admin_menu.add_command(label="Post System Notification", command=self._post_notification)
-        admin_menu.add_separator()
-        admin_menu.add_command(label="Manage AP Credentials", command=self._open_credentials_manager)
-        admin_menu.add_command(label="Manage Users", command=self._open_user_management)
-        admin_menu.add_command(label="Change Password", command=self._change_password)
-        admin_menu.add_separator()
-        admin_menu.add_command(label="Admin Settings", command=self._open_admin_settings)
-        admin_menu.add_command(label="Audit Log", command=self._open_audit_log)
+        self._create_menu_button(menubar_frame, "Admin", [
+            ("Add New AP", self._add_new_ap),
+            None,
+            ("Post System Notification", self._post_notification),
+            None,
+            ("Manage AP Credentials", self._open_credentials_manager),
+            ("Manage Users", self._open_user_management),
+            ("Change Password", self._change_password),
+            None,
+            ("Admin Settings", self._open_admin_settings),
+            ("Audit Log", self._open_audit_log)
+        ])
         
         # Help Menu
-        help_menu = tk.Menu(menubar, tearoff=0)
-        menubar.add_cascade(label="Help", menu=help_menu)
-        help_menu.add_command(label="Documentation", command=self._show_documentation)
-        help_menu.add_command(label="About", command=self._show_about)
+        self._create_menu_button(menubar_frame, "Help", [
+            ("Documentation", self._show_documentation),
+            ("About", self._show_about)
+        ])
+    
+    def _create_menu_button(self, parent, label, items):
+        """Create a custom menu button with dropdown."""
+        btn = tk.Button(parent, text=label, font=('Segoe UI', 11), 
+                       bg="#FFFFFF", fg="#212529", relief=tk.FLAT,
+                       activebackground="#E9ECEF", activeforeground="#212529",
+                       padx=15, pady=8, cursor="hand2", bd=0)
+        btn.pack(side=tk.LEFT)
+        
+        # Add hover effects
+        def on_enter(e):
+            btn.config(bg="#E9ECEF")
+        
+        def on_leave(e):
+            btn.config(bg="#FFFFFF")
+        
+        btn.bind("<Enter>", on_enter)
+        btn.bind("<Leave>", on_leave)
+        
+        def show_dropdown(event=None):
+            # Close any existing dropdown
+            if self.active_dropdown:
+                try:
+                    self.active_dropdown.destroy()
+                except:
+                    pass
+            
+            # Create dropdown menu
+            dropdown = tk.Toplevel(self.root)
+            dropdown.overrideredirect(True)  # Remove window decorations
+            dropdown.configure(bg="#FFFFFF")
+            
+            # Position below button
+            x = btn.winfo_rootx()
+            y = btn.winfo_rooty() + btn.winfo_height()
+            dropdown.geometry(f"+{x}+{y}")
+            
+            # Add menu items
+            for item in items:
+                if item is None:
+                    # Separator
+                    sep = tk.Frame(dropdown, bg="#E0E0E0", height=1)
+                    sep.pack(fill=tk.X, padx=5, pady=2)
+                else:
+                    item_label, item_command = item
+                    item_btn = tk.Button(dropdown, text=item_label, font=('Segoe UI', 10),
+                                        bg="#FFFFFF", fg="#212529", relief=tk.FLAT,
+                                        activebackground="#E9ECEF", activeforeground="#212529",
+                                        anchor="w", padx=20, pady=8, cursor="hand2", bd=0)
+                    item_btn.pack(fill=tk.X)
+                    
+                    # Add hover effects to menu items
+                    def on_item_enter(e, btn=item_btn):
+                        btn.config(bg="#E9ECEF")
+                    
+                    def on_item_leave(e, btn=item_btn):
+                        btn.config(bg="#FFFFFF")
+                    
+                    item_btn.bind("<Enter>", on_item_enter)
+                    item_btn.bind("<Leave>", on_item_leave)
+                    
+                    def on_click(cmd=item_command):
+                        dropdown.destroy()
+                        self.active_dropdown = None
+                        cmd()
+                    
+                    item_btn.config(command=on_click)
+            
+            # Add border
+            dropdown.configure(relief=tk.SOLID, bd=1, highlightthickness=1, highlightbackground="#CED4DA")
+            
+            self.active_dropdown = dropdown
+            
+            # Close dropdown on click outside
+            def close_dropdown(event):
+                if self.active_dropdown:
+                    try:
+                        self.active_dropdown.destroy()
+                    except:
+                        pass
+                    self.active_dropdown = None
+            
+            dropdown.bind("<FocusOut>", close_dropdown)
+            dropdown.focus_set()
+        
+        btn.config(command=show_dropdown)
     
     def _create_top_banner(self):
         """Create top banner with app name, logo, and admin notifications."""
-        banner = tk.Frame(self.root, bg="#0066CC", height=80)
+        banner = tk.Frame(self.root, bg="#003D82", height=100)
         banner.pack(fill=tk.X, side=tk.TOP)
         banner.pack_propagate(False)
         
         # Left side: Logo and app name
-        left_frame = tk.Frame(banner, bg="#0066CC")
-        left_frame.pack(side=tk.LEFT, padx=20, pady=15)
+        left_frame = tk.Frame(banner, bg="#003D82")
+        left_frame.pack(side=tk.LEFT, padx=20, pady=20)
         
         # SVG-style logo placeholder (will use actual SVG/icon later)
         logo_frame = tk.Frame(left_frame, bg="white", width=50, height=50)
@@ -97,49 +210,78 @@ class DashboardMain:
         logo_frame.pack_propagate(False)
         
         tk.Label(logo_frame, text="V", font=('Segoe UI', 24, 'bold'),
-                bg="white", fg="#0066CC").pack(expand=True)
+                bg="white", fg="#003D82").pack(expand=True)
         
         # App name and tagline
-        name_frame = tk.Frame(left_frame, bg="#0066CC")
+        name_frame = tk.Frame(left_frame, bg="#003D82")
         name_frame.pack(side=tk.LEFT)
         
         tk.Label(name_frame, text="VERA", font=('Segoe UI', 20, 'bold'),
-                bg="#0066CC", fg="white").pack(anchor="w")
+                bg="#003D82", fg="white").pack(anchor="w")
         
         tk.Label(name_frame, text="Vusion support with a human touch", 
                 font=('Segoe UI', 9),
-                bg="#0066CC", fg="#E0E0E0").pack(anchor="w")
+                bg="#003D82", fg="#D0D0D0").pack(anchor="w")
         
         # Right side: User info
-        right_frame = tk.Frame(banner, bg="#0066CC")
-        right_frame.pack(side=tk.RIGHT, padx=20, pady=15)
+        right_frame = tk.Frame(banner, bg="#003D82")
+        right_frame.pack(side=tk.RIGHT, padx=20, pady=20)
         
-        tk.Label(right_frame, text=f"Welcome, {self.current_user}", 
+        # Show full name from user data (handle both dict and string)
+        if isinstance(self.current_user, dict):
+            user_display = self.current_user.get('full_name', self.current_user.get('username', 'User'))
+        else:
+            user_display = self.current_user
+        
+        tk.Label(right_frame, text=f"Welcome, {user_display}", 
                 font=('Segoe UI', 10),
-                bg="#0066CC", fg="white").pack(anchor="e")
+                bg="#003D82", fg="white").pack(anchor="e")
         
         # Admin notification area (will be shown when notification exists)
         self.notification_frame = tk.Frame(self.root, bg="#FFF3CD", bd=1, relief=tk.SOLID)
         # Pack will be done when notification is loaded
     
-    def _create_dashboard(self):
+    def _create_layout(self):
         """Create 4-panel dashboard layout with resizable panes."""
         
+        # Configure style for visible sash handles
+        style = ttk.Style()
+        style.configure('Sash.TPanedwindow', sashwidth=8, sashrelief=tk.RAISED, background='#D0D0D0')
+        
         # Main container with vertical split (upper / lower)
-        main_paned = ttk.PanedWindow(self.root, orient=tk.VERTICAL)
-        main_paned.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
+        self.main_paned = tk.PanedWindow(self.root, orient=tk.VERTICAL, 
+                                         sashwidth=8, sashrelief=tk.RAISED, 
+                                         bg='#D0D0D0', bd=0)
+        self.main_paned.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
         
         # Upper pane with horizontal split (AP Panel / Context Panel)
-        upper_paned = ttk.PanedWindow(main_paned, orient=tk.HORIZONTAL)
-        main_paned.add(upper_paned, weight=3)
+        self.upper_paned = tk.PanedWindow(self.main_paned, orient=tk.HORIZONTAL,
+                                          sashwidth=8, sashrelief=tk.RAISED,
+                                          bg='#D0D0D0', bd=0)
+        self.main_paned.add(self.upper_paned, minsize=200)
         
         # Lower pane with horizontal split (Activity Log / Content Panel)
-        lower_paned = ttk.PanedWindow(main_paned, orient=tk.HORIZONTAL)
-        main_paned.add(lower_paned, weight=2)
+        self.lower_paned = tk.PanedWindow(self.main_paned, orient=tk.HORIZONTAL,
+                                          sashwidth=8, sashrelief=tk.RAISED,
+                                          bg='#D0D0D0', bd=0)
+        self.main_paned.add(self.lower_paned, minsize=150)
+        
+        # Create panels (Content Panel first so AP Panel can reference it)
         
         # === UPPER LEFT: AP Panel ===
-        ap_frame = ttk.Frame(upper_paned, relief=tk.RIDGE, borderwidth=1)
-        upper_paned.add(ap_frame, weight=1)
+        ap_frame = ttk.Frame(self.upper_paned, relief=tk.RIDGE, borderwidth=1)
+        self.upper_paned.add(ap_frame, minsize=400)
+        
+        # Content Panel (temporary, will be properly initialized below)
+        content_frame = ttk.Frame(self.lower_paned, relief=tk.RIDGE, borderwidth=1)
+        
+        self.content_panel = ContentPanel(
+            content_frame,
+            self.db,
+            current_user=self.current_user,
+            log_callback=self._log_activity,
+            refresh_callback=None  # Will set after context panel is created
+        )
         
         self.ap_panel = APPanel(
             ap_frame, 
@@ -147,35 +289,33 @@ class DashboardMain:
             self.db,
             on_ap_change=self._on_ap_changed,
             on_tab_change=self._on_ap_tab_changed,
-            log_callback=self._log_activity
+            log_callback=self._log_activity,
+            content_panel=self.content_panel
         )
         
         # === UPPER RIGHT: Context Panel ===
-        context_frame = ttk.Frame(upper_paned, relief=tk.RIDGE, borderwidth=1)
-        upper_paned.add(context_frame, weight=1)
+        context_frame = ttk.Frame(self.upper_paned, relief=tk.RIDGE, borderwidth=1)
+        self.upper_paned.add(context_frame, minsize=400)
         
         self.context_panel = ContextPanel(
             context_frame,
             self.db,
+            current_user=self.current_user,
             on_selection=self._on_context_selection,
             log_callback=self._log_activity
         )
         
-        # === LOWER LEFT: Activity Log Panel ===
-        log_frame = ttk.Frame(lower_paned, relief=tk.RIDGE, borderwidth=1)
-        lower_paned.add(log_frame, weight=1)
+        # Set refresh callback now that context panel exists
+        self.content_panel.refresh_callback = lambda: self.context_panel._load_notes()
+        
+        # === LOWER LEFT: Activity Log ===
+        log_frame = ttk.Frame(self.lower_paned, relief=tk.RIDGE, borderwidth=1)
+        self.lower_paned.add(log_frame, minsize=300)
         
         self.activity_log = ActivityLogPanel(log_frame)
         
         # === LOWER RIGHT: Content Panel ===
-        content_frame = ttk.Frame(lower_paned, relief=tk.RIDGE, borderwidth=1)
-        lower_paned.add(content_frame, weight=1)
-        
-        self.content_panel = ContentPanel(
-            content_frame,
-            self.db,
-            log_callback=self._log_activity
-        )
+        self.lower_paned.add(content_frame, minsize=400)
     
     # === Event Handlers ===
     
@@ -220,6 +360,8 @@ class DashboardMain:
             self.content_panel.show_vusion_details(item_data)
         elif item_type == "note":
             self.content_panel.show_note_details(item_data)
+        elif item_type == "add_note":
+            self.content_panel.show_add_note_form(item_data["ap_id"], item_data.get("ap_data"))
     
     def _log_activity(self, source, message, level="info"):
         """Central logging function called by all panels."""
@@ -296,8 +438,8 @@ class DashboardMain:
     def _open_admin_settings(self):
         """Open admin settings window."""
         try:
-            from admin_settings import AdminSettingsWindow
-            AdminSettingsWindow(self.root, self.current_user, self.db)
+            from admin_settings import AdminSettingsDialog
+            AdminSettingsDialog(self.root, self.current_user, self.db)
             self.activity_log.log_message("Admin", "Opened Admin Settings", "info")
         except Exception as e:
             messagebox.showerror("Error", f"Failed to open Admin Settings: {e}")
@@ -333,7 +475,147 @@ class DashboardMain:
         """Handle application exit."""
         if messagebox.askokcancel("Exit", "Are you sure you want to exit?", parent=self.root):
             self.activity_log.log_message("Dashboard", "Application closed", "info")
+            self._save_window_state()
             self.root.quit()
+            self.root.destroy()
+    
+    def _on_closing(self):
+        """Handle window close event."""
+        # Check if browser is running
+        if hasattr(self, 'content_panel') and self.content_panel.is_browser_running():
+            from tkinter import messagebox
+            if not messagebox.askyesno("Browser Running", 
+                                       "Browser is still running. Are you sure you want to close?\n\n"
+                                       "This will close all browser connections.",
+                                       parent=self.root):
+                return
+            
+            # Stop the browser
+            try:
+                self.content_panel.stop_browser()
+            except:
+                pass
+        
+        self._save_window_state()
+        self.root.quit()
+        self.root.destroy()
+    
+    def _get_config_file(self):
+        """Get path to configuration file."""
+        return os.path.join(os.path.dirname(__file__), 'dashboard_config.json')
+    
+    def _load_window_geometry(self):
+        """Load saved window size and position."""
+        try:
+            config_file = self._get_config_file()
+            if os.path.exists(config_file):
+                with open(config_file, 'r') as f:
+                    config = json.load(f)
+                    geometry = config.get('window_geometry', '1600x900')
+                    print(f"Loading window geometry: {geometry}")
+                    self.root.geometry(geometry)
+            else:
+                print("No saved geometry found, using default 1600x900")
+                self.root.geometry("1600x900")
+        except Exception as e:
+            print(f"Error loading window geometry: {e}")
+            self.root.geometry("1600x900")
+    
+    def _load_pane_positions(self):
+        """Load saved pane sash positions."""
+        try:
+            config_file = self._get_config_file()
+            if os.path.exists(config_file):
+                with open(config_file, 'r') as f:
+                    config = json.load(f)
+                    
+                    # Restore main paned window position (vertical split)
+                    # Default to 450 if not set or too small
+                    main_pos = config.get('main_pane_pos', 450)
+                    if main_pos < 300:  # Increased minimum from 200 to 300
+                        main_pos = 450
+                    self.main_paned.sash_place(0, 0, main_pos)
+                    print(f"Main pane position set to: {main_pos}")
+                    
+                    # Restore upper paned window position (horizontal split)
+                    # Default to 600 if not set or too small
+                    upper_pos = config.get('upper_pane_pos', 600)
+                    if upper_pos < 400:  # Increased minimum from 300 to 400
+                        upper_pos = 600
+                    self.upper_paned.sash_place(0, upper_pos, 0)
+                    print(f"Upper pane position set to: {upper_pos}")
+                    
+                    # Restore lower paned window position (horizontal split)
+                    # Default to 600 if not set or too small
+                    lower_pos = config.get('lower_pane_pos', 600)
+                    if lower_pos < 400:  # Increased minimum from 300 to 400
+                        lower_pos = 600
+                    self.lower_paned.sash_place(0, lower_pos, 0)
+                    print(f"Lower pane position set to: {lower_pos}")
+            else:
+                # Set default positions if no config exists
+                print("No config found, using defaults")
+                self.root.update_idletasks()
+                window_height = self.root.winfo_height()
+                window_width = self.root.winfo_width()
+                self.main_paned.sash_place(0, 0, max(450, int(window_height * 0.5)))
+                self.upper_paned.sash_place(0, max(600, int(window_width * 0.45)), 0)
+                self.lower_paned.sash_place(0, max(600, int(window_width * 0.45)), 0)
+        except Exception as e:
+            print(f"Error loading pane positions: {e}")
+            # Set defaults on error
+            self.root.update_idletasks()
+            window_height = self.root.winfo_height()
+            window_width = self.root.winfo_width()
+            self.main_paned.sash_place(0, 0, max(450, int(window_height * 0.5)))
+            self.upper_paned.sash_place(0, max(600, int(window_width * 0.45)), 0)
+            self.lower_paned.sash_place(0, max(600, int(window_width * 0.45)), 0)
+    
+    def _save_window_state(self):
+        """Save window size, position, and pane positions."""
+        try:
+            # Ensure all pending updates are processed
+            self.root.update_idletasks()
+            
+            config = {
+                'window_geometry': self.root.geometry()
+            }
+            
+            # Only save pane positions if they exist and are valid
+            if hasattr(self, 'main_paned'):
+                main_pos = self.main_paned.sash_coord(0)[1]
+                # Don't save if position is too small
+                if main_pos >= 300:
+                    config['main_pane_pos'] = main_pos
+                else:
+                    config['main_pane_pos'] = 450
+                print(f"Saving main pane: {config['main_pane_pos']}")
+                
+            if hasattr(self, 'upper_paned'):
+                upper_pos = self.upper_paned.sash_coord(0)[0]
+                # Don't save if position is too small
+                if upper_pos >= 400:
+                    config['upper_pane_pos'] = upper_pos
+                else:
+                    config['upper_pane_pos'] = 600
+                print(f"Saving upper pane: {config['upper_pane_pos']}")
+                
+            if hasattr(self, 'lower_paned'):
+                lower_pos = self.lower_paned.sash_coord(0)[0]
+                # Don't save if position is too small
+                if lower_pos >= 400:
+                    config['lower_pane_pos'] = lower_pos
+                else:
+                    config['lower_pane_pos'] = 600
+                print(f"Saving lower pane: {config['lower_pane_pos']}")
+            
+            config_file = self._get_config_file()
+            with open(config_file, 'w') as f:
+                json.dump(config, f, indent=2)
+            
+            print(f"Window state saved: {config['window_geometry']}")
+        except Exception as e:
+            print(f"Error saving window state: {e}")
     
     # === Admin Notification System ===
     
@@ -576,12 +858,41 @@ class DashboardMain:
 
 
 def main():
-    """Main entry point for testing dashboard."""
-    root = tk.Tk()
+    """Main entry point for dashboard."""
+    from splash_screen import SplashScreen
+    from login_dialog import LoginDialog
+    
+    # Show splash screen
+    splash = SplashScreen()
+    splash.update_progress(10, "Loading configuration...")
+    
+    # Show login dialog
+    splash.update_progress(30, "Waiting for authentication...")
+    login = LoginDialog()
+    user = login.show()
+    
+    if not user:
+        # User cancelled login
+        splash.close()
+        return
+    
+    splash.update_progress(50, "Initializing database...")
     db = DatabaseManager()
     
-    # Test with a dummy user
-    dashboard = DashboardMain(root, "test_user", db)
+    splash.update_progress(70, "Loading user interface...")
+    root = tk.Tk()
+    root.withdraw()  # Hide main window during setup
+    
+    splash.update_progress(90, "Setting up dashboard...")
+    dashboard = DashboardMain(root, user, db)
+    
+    splash.update_progress(100, "Starting application...")
+    
+    # Close splash and show main window
+    import time
+    time.sleep(0.2)
+    splash.close()
+    root.deiconify()  # Show main window
     
     root.mainloop()
 

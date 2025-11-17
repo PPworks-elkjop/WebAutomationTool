@@ -17,7 +17,7 @@ class LoginDialog:
         self.dialog = tk.Tk()
         
         self.dialog.title("VERA - Login")
-        self.dialog.geometry("400x450")
+        self.dialog.geometry("400x550")
         self.dialog.resizable(False, False)
         
         # Force window to front and make it visible
@@ -47,82 +47,116 @@ class LoginDialog:
     
     def _build_ui(self):
         """Build the login dialog UI."""
-        # Configure style
-        style = ttk.Style()
-        style.theme_use('clam')
+        self.dialog.configure(bg="#F8F9FA")
         
-        bg_color = "#F5F5F5"
-        frame_bg = "#FFFFFF"
-        accent_color = "#28A745"
+        # Header with gradient-like design
+        header = tk.Frame(self.dialog, bg="#3D6B9E", height=140)
+        header.pack(fill=tk.X)
+        header.pack_propagate(False)
         
-        self.dialog.configure(bg=bg_color)
+        # Logo and title container
+        title_container = tk.Frame(header, bg="#3D6B9E")
+        title_container.pack(expand=True, pady=(20, 0))
         
-        style.configure("Login.TFrame", background=frame_bg)
-        style.configure("Login.TLabel", background=frame_bg, foreground="#333333", font=("Segoe UI", 10))
-        style.configure("Login.Title.TLabel", background=frame_bg, foreground="#333333", font=("Segoe UI", 16, "bold"))
-        style.configure("Login.TEntry", fieldbackground="white", padding=8)
-        style.configure("Login.TButton", background=accent_color, foreground="white", font=("Segoe UI", 10), padding=8)
+        # V logo
+        logo_frame = tk.Frame(title_container, bg="white", width=50, height=50)
+        logo_frame.pack(side=tk.LEFT, padx=(0, 15))
+        logo_frame.pack_propagate(False)
         
-        # Main frame
-        main_frame = ttk.Frame(self.dialog, padding=30, style="Login.TFrame")
-        main_frame.pack(fill="both", expand=True)
+        tk.Label(logo_frame, text="V", font=('Segoe UI', 28, 'bold'),
+                bg="white", fg="#003D82").pack(expand=True)
         
-        # Title with robot-granny emoji
-        title_label = ttk.Label(main_frame, text="👵🤖 VERA", style="Login.Title.TLabel")
-        title_label.pack(pady=(0, 5))
+        # VERA title
+        tk.Label(title_container, text="VERA", font=('Segoe UI', 32, 'bold'),
+                bg="#3D6B9E", fg="white").pack(anchor="w")
         
-        subtitle_label = ttk.Label(main_frame, text="Vusion support with a human touch", 
-                                   style="Login.TLabel", font=("Segoe UI", 9, "italic"))
-        subtitle_label.pack(pady=(0, 5))
+        tk.Label(header, text="Vusion Expert Robot Assistant", font=('Segoe UI', 11),
+                bg="#3D6B9E", fg="#E0E0E0").pack()
         
-        signin_label = ttk.Label(main_frame, text="Please sign in to continue", style="Login.TLabel")
-        signin_label.pack(pady=(0, 30))
+        tk.Label(header, text="Support with a human touch", font=('Segoe UI', 9, 'italic'),
+                bg="#3D6B9E", fg="#B0C4DE").pack(pady=(2, 0))
         
-        # Username
-        username_frame = ttk.Frame(main_frame, style="Login.TFrame")
-        username_frame.pack(fill="x", pady=(0, 15))
+        # Content area
+        content = tk.Frame(self.dialog, bg="#FFFFFF", padx=40, pady=30)
+        content.pack(fill=tk.BOTH, expand=True)
         
-        ttk.Label(username_frame, text="Username:", style="Login.TLabel").pack(anchor="w", pady=(0, 5))
-        self.username_entry = ttk.Entry(username_frame, font=("Segoe UI", 10), style="Login.TEntry")
-        self.username_entry.pack(fill="x")
+        tk.Label(content, text="Please sign in to continue", font=('Segoe UI', 10),
+                bg="#FFFFFF", fg="#6C757D").pack(pady=(0, 25))
+        
+        # Username field
+        tk.Label(content, text="Username", font=('Segoe UI', 9, 'bold'),
+                bg="#FFFFFF", fg="#495057", anchor="w").pack(fill=tk.X, pady=(0, 5))
+        
+        username_container = tk.Frame(content, bg="#F8F9FA", relief=tk.SOLID, borderwidth=1)
+        username_container.pack(fill=tk.X, pady=(0, 15))
+        
+        self.username_entry = tk.Entry(username_container, font=('Segoe UI', 11),
+                                       bg="#F8F9FA", fg="#212529", relief=tk.FLAT, bd=0)
+        self.username_entry.pack(fill=tk.X, padx=12, pady=10)
         self.username_entry.insert(0, "peterander")  # Pre-fill for testing
         
-        # Password
-        password_frame = ttk.Frame(main_frame, style="Login.TFrame")
-        password_frame.pack(fill="x", pady=(0, 20))
+        # Password field
+        tk.Label(content, text="Password", font=('Segoe UI', 9, 'bold'),
+                bg="#FFFFFF", fg="#495057", anchor="w").pack(fill=tk.X, pady=(0, 5))
         
-        ttk.Label(password_frame, text="Password:", style="Login.TLabel").pack(anchor="w", pady=(0, 5))
-        self.password_entry = ttk.Entry(password_frame, show="*", font=("Segoe UI", 10), style="Login.TEntry")
-        self.password_entry.pack(fill="x")
+        password_container = tk.Frame(content, bg="#F8F9FA", relief=tk.SOLID, borderwidth=1)
+        password_container.pack(fill=tk.X, pady=(0, 10))
+        
+        self.password_entry = tk.Entry(password_container, show="●", font=('Segoe UI', 11),
+                                       bg="#F8F9FA", fg="#212529", relief=tk.FLAT, bd=0)
+        self.password_entry.pack(fill=tk.X, padx=12, pady=10)
         self.password_entry.insert(0, "Test1234567890")  # Pre-fill for testing
         
         # Show password checkbox
         self.show_password_var = tk.BooleanVar(value=False)
-        show_pwd_check = ttk.Checkbutton(password_frame, text="Show password", 
-                                         variable=self.show_password_var,
-                                         command=self._toggle_password)
-        show_pwd_check.pack(anchor="w", pady=(5, 0))
+        check_container = tk.Frame(content, bg="#FFFFFF")
+        check_container.pack(anchor="w", pady=(0, 25))
+        
+        checkbox_frame = tk.Frame(check_container, bg="#FFFFFF", relief=tk.SOLID, borderwidth=1,
+                                 width=16, height=16, cursor="hand2")
+        checkbox_frame.pack(side=tk.LEFT, padx=(0, 8))
+        checkbox_frame.pack_propagate(False)
+        
+        self.checkbox_label = tk.Label(checkbox_frame, text="", bg="#FFFFFF", fg="#3D6B9E",
+                                       font=('Segoe UI', 10, 'bold'))
+        self.checkbox_label.pack(expand=True)
+        
+        text_label = tk.Label(check_container, text="Show password", font=('Segoe UI', 9),
+                             bg="#FFFFFF", fg="#495057", cursor="hand2")
+        text_label.pack(side=tk.LEFT)
+        
+        def toggle_show_password():
+            self.show_password_var.set(not self.show_password_var.get())
+            self._toggle_password()
+        
+        checkbox_frame.bind("<Button-1>", lambda e: toggle_show_password())
+        self.checkbox_label.bind("<Button-1>", lambda e: toggle_show_password())
+        text_label.bind("<Button-1>", lambda e: toggle_show_password())
         
         # Buttons
-        button_frame = ttk.Frame(main_frame, style="Login.TFrame")
-        button_frame.pack(fill="x", pady=(10, 0))
+        button_frame = tk.Frame(content, bg="#FFFFFF")
+        button_frame.pack(fill=tk.X)
         
-        login_btn = tk.Button(button_frame, text="Login", command=self._on_login, 
-                             font=("Segoe UI", 10), bg="#28A745", fg="white",
-                             relief="flat", padx=20, pady=8, cursor="hand2")
-        login_btn.pack(side="right", padx=(10, 0))
+        tk.Button(button_frame, text="Login", command=self._on_login,
+                 bg="#3D6B9E", fg="white", font=('Segoe UI', 11, 'bold'),
+                 padx=30, pady=10, relief=tk.FLAT, cursor="hand2",
+                 borderwidth=0).pack(side=tk.RIGHT, padx=(10, 0))
         
-        cancel_btn = tk.Button(button_frame, text="Cancel", command=self._on_cancel,
-                              font=("Segoe UI", 10), bg="#6C757D", fg="white",
-                              relief="flat", padx=20, pady=8, cursor="hand2")
-        cancel_btn.pack(side="right")
+        tk.Button(button_frame, text="Cancel", command=self._on_cancel,
+                 bg="#6C757D", fg="white", font=('Segoe UI', 11),
+                 padx=25, pady=10, relief=tk.FLAT, cursor="hand2",
+                 borderwidth=0).pack(side=tk.RIGHT)
     
     def _toggle_password(self):
         """Toggle password visibility."""
         if self.show_password_var.get():
             self.password_entry.config(show="")
+            self.checkbox_label.config(text="✓", bg="#3D6B9E", fg="#FFFFFF")
+            self.checkbox_label.master.config(bg="#3D6B9E")
         else:
-            self.password_entry.config(show="*")
+            self.password_entry.config(show="●")
+            self.checkbox_label.config(text="", bg="#FFFFFF")
+            self.checkbox_label.master.config(bg="#FFFFFF")
     
     def _on_login(self):
         """Handle login button click."""

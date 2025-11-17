@@ -48,7 +48,9 @@ class IconHelper:
         'terminal': '\ueb8e',
         'router': '\ue328',
         'visibility': '\ue8f4',
-        'visibility_off': '\ue8f5'
+        'visibility_off': '\ue8f5',
+        'edit_square': '\uf032',
+        'delete_forever': '\ue92b'
     }
     
     @classmethod

@@ -42,12 +42,27 @@ class SplashScreen:
         header.pack(fill=tk.X)
         header.pack_propagate(False)
         
-        # App name
-        tk.Label(header, text="AP Helper", font=('Segoe UI', 28, 'bold'),
-                bg="#0066CC", fg="white").pack(expand=True)
+        # Logo and title container
+        title_container = tk.Frame(header, bg="#0066CC")
+        title_container.pack(pady=(15, 2))
         
-        tk.Label(header, text="Version 3.0", font=('Segoe UI', 12),
-                bg="#0066CC", fg="#E0E0E0").pack()
+        # V logo
+        logo_frame = tk.Frame(title_container, bg="white", width=45, height=45)
+        logo_frame.pack(side=tk.LEFT, padx=(0, 12))
+        logo_frame.pack_propagate(False)
+        
+        tk.Label(logo_frame, text="V", font=('Segoe UI', 26, 'bold'),
+                bg="white", fg="#003D82").pack(expand=True)
+        
+        # App name with VERA branding
+        tk.Label(title_container, text="VERA", font=('Segoe UI', 32, 'bold'),
+                bg="#0066CC", fg="white").pack(anchor="w")
+        
+        tk.Label(header, text="Vusion Expert Robot Assistant", font=('Segoe UI', 11),
+                bg="#0066CC", fg="#E0E0E0").pack(pady=(0, 2))
+        
+        tk.Label(header, text="Version 3.0", font=('Segoe UI', 10),
+                bg="#0066CC", fg="#B0C4DE").pack()
         
         # Content area
         content = tk.Frame(container, bg="#FFFFFF", padx=40, pady=30)

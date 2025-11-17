@@ -29,6 +29,7 @@ class BrowserManager:
         self.progress_callback = progress_callback
         self.extract_xml_callback = extract_xml_callback
         self.handle_cato_callback = handle_cato_callback
+        self.db = None  # Database reference for updates
     
     def log(self, message):
         """Log a message"""
@@ -58,9 +59,16 @@ class BrowserManager:
         service = Service(ChromeDriverManager().install())
         self.driver = webdriver.Chrome(service=service, options=chrome_options)
         
-        # Set page load timeout to 30 seconds
-        self.driver.set_page_load_timeout(30)
-        self.driver.implicitly_wait(10)
+        # Set page load timeout to 60 seconds (increased for slower connections)
+        self.driver.set_page_load_timeout(60)
+        self.driver.implicitly_wait(15)
+        
+        # Minimize the browser window
+        try:
+            self.driver.minimize_window()
+            self.log("✓ Browser window minimized")
+        except:
+            self.log("⚠ Could not minimize browser window")
         
         self.log("✓ Chrome driver initialized")
     
@@ -172,8 +180,8 @@ class BrowserManager:
                         self.log(f"⚠ Navigation timeout for {ap_id}, but continuing...")
                         # Page is still loading, we'll check the result in verification phase
                     
-                    # Wait a bit for page to load, then check for Cato warning (same as Quick Connect)
-                    time.sleep(2)
+                    # Wait for initial page load
+                    time.sleep(3)
                     
                     # Check for and handle Cato warning immediately after navigation
                     if self.handle_cato_callback:
@@ -181,6 +189,8 @@ class BrowserManager:
                             cato_detected = self.handle_cato_callback(self.driver)
                             if cato_detected:
                                 self.log(f"✓ Cato warning handled for {ap_id}")
+                                # Wait additional time after CATO click for page to reload
+                                time.sleep(4)
                         except Exception as e:
                             self.log(f"⚠ Error checking Cato warning for {ap_id}: {str(e)}")
                     
@@ -212,6 +222,10 @@ class BrowserManager:
             
             self.log(f"✓ All {total_aps} tabs are now loading")
             
+            # Give pages more time to fully load (especially after CATO handling)
+            self.log("Waiting for pages to fully load...")
+            time.sleep(5)
+            
             # PHASE 3: Verify connections
             self.log(f"\n=== Phase 3: Verifying connections ===")
             self.progress("Verifying all connections...", 60)
@@ -233,10 +247,22 @@ class BrowserManager:
                     continue
                 
                 try:
+                    from selenium.common.exceptions import TimeoutException
+                    
                     self.driver.switch_to.window(tab_handle)
-                    current_url = self.driver.current_url
-                    page_title = self.driver.title
-                    page_source = self.driver.page_source
+                    
+                    # Get page info with timeout protection
+                    try:
+                        current_url = self.driver.current_url
+                        page_title = self.driver.title
+                        page_source = self.driver.page_source
+                    except TimeoutException:
+                        self.log(f"  - Timeout getting page info for {ap_id}, marking as failed")
+                        tab_info['status'] = 'failed'
+                        failed_aps.append(f"Timeout verifying {ap_id}")
+                        if status_dialog:
+                            status_dialog.update_status(ap_id, "failed", "Timeout during verification")
+                        continue
                     
                     # Check for Chrome error pages
                     is_error_page = False
@@ -488,6 +514,118 @@ class BrowserManager:
                 return matches[1].strip()
         
         return None
+    
+    def collect_current_page_data(self, ap_id):
+        """Collect data from the current status.xml page and update database.
+        
+        Args:
+            ap_id: The AP ID to collect data for
+            
+        Returns:
+            dict: Result with status and message
+        """
+        if not self.driver:
+            return {'status': 'error', 'message': 'Browser not initialized'}
+        
+        if not self.extract_xml_callback:
+            return {'status': 'error', 'message': 'Extract callback not configured'}
+        
+        if not self.db:
+            return {'status': 'error', 'message': 'Database not configured'}
+        
+        try:
+            from credentials_manager import CredentialsManager
+            creds_manager = CredentialsManager(self.db)
+            
+            page_source = self.driver.page_source
+            
+            # Check if this is a status.xml page
+            if 'status.xml' not in self.driver.current_url:
+                return {'status': 'error', 'message': 'Not on status.xml page'}
+            
+            # Extract all fields
+            extracted_ap_id = self.extract_xml_callback(page_source, "AP ID")
+            transmitter = self.extract_xml_callback(page_source, "Transmitter")
+            store_id = self.extract_xml_callback(page_source, "Store ID")
+            ip_address = self.extract_xml_callback(page_source, "IP Address")
+            serial_number = self.extract_xml_callback(page_source, "Serial Number")
+            software_version = self.extract_xml_callback(page_source, "Software Version")
+            firmware_version = self.extract_xml_callback(page_source, "Firmware Version")
+            hardware_revision = self.extract_xml_callback(page_source, "Hardware Revision")
+            build = self.extract_xml_callback(page_source, "Build")
+            configuration_mode = self.extract_xml_callback(page_source, "Configuration mode")
+            uptime = self.extract_xml_callback(page_source, "Uptime")
+            mac_address = self.extract_xml_callback(page_source, "MAC Address")
+            
+            # Extract status fields
+            service_status = self._extract_status_field(page_source, "service")
+            communication_daemon_status = self._extract_status_field(page_source, "daemon")
+            
+            # Extract connectivity status
+            connectivity_internet = self.extract_xml_callback(page_source, "Internet")
+            connectivity_provisioning = self.extract_xml_callback(page_source, "Provisioning")
+            connectivity_ntp_server = self.extract_xml_callback(page_source, "NTP Server")
+            connectivity_apc_address = self.extract_xml_callback(page_source, "APC Address")
+            
+            self.log(f"Collected data - AP ID: {extracted_ap_id}, Type: {transmitter}, Store: {store_id}")
+            self.log(f"  Serial: {serial_number}, SW: {software_version}, FW: {firmware_version}")
+            self.log(f"  Service: {service_status}, Daemon: {communication_daemon_status}")
+            
+            if extracted_ap_id:
+                existing_ap = creds_manager.find_by_ap_id(extracted_ap_id)
+                
+                if existing_ap:
+                    # Prepare update data
+                    update_data = {}
+                    fields_to_update = [
+                        ('ip_address', ip_address),
+                        ('store_id', store_id),
+                        ('type', transmitter),
+                        ('serial_number', serial_number),
+                        ('software_version', software_version),
+                        ('firmware_version', firmware_version),
+                        ('hardware_revision', hardware_revision),
+                        ('build', build),
+                        ('configuration_mode', configuration_mode),
+                        ('service_status', service_status),
+                        ('uptime', uptime),
+                        ('communication_daemon_status', communication_daemon_status),
+                        ('mac_address', mac_address),
+                        ('connectivity_internet', connectivity_internet),
+                        ('connectivity_provisioning', connectivity_provisioning),
+                        ('connectivity_ntp_server', connectivity_ntp_server),
+                        ('connectivity_apc_address', connectivity_apc_address)
+                    ]
+                    
+                    for field_name, new_value in fields_to_update:
+                        if new_value and existing_ap.get(field_name) != new_value:
+                            update_data[field_name] = new_value
+                    
+                    if update_data:
+                        success, msg = creds_manager.update_credential(
+                            existing_ap.get('store_id', ''), 
+                            extracted_ap_id, 
+                            update_data
+                        )
+                        
+                        if success:
+                            self.log(f"✓ Updated {len(update_data)} fields for AP {extracted_ap_id}")
+                            return {'status': 'success', 'message': f'Updated {len(update_data)} fields', 'ap_id': extracted_ap_id}
+                        else:
+                            self.log(f"✗ Failed to update database: {msg}")
+                            return {'status': 'error', 'message': msg}
+                    else:
+                        self.log(f"No changes detected for AP {extracted_ap_id}")
+                        return {'status': 'success', 'message': 'No changes needed', 'ap_id': extracted_ap_id}
+                else:
+                    return {'status': 'error', 'message': f'AP {extracted_ap_id} not found in database'}
+            else:
+                return {'status': 'error', 'message': 'Could not extract AP ID from page'}
+                
+        except Exception as e:
+            error_msg = f"Error collecting data: {str(e)}"
+            self.log(error_msg)
+            return {'status': 'error', 'message': error_msg}
     
     def close(self):
         """Close the browser"""

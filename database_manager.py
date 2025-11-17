@@ -567,17 +567,37 @@ class DatabaseManager:
         except Exception as e:
             return False, f"Error deleting AP: {str(e)}"
     
-    def search_access_points(self, query: str) -> List[Dict]:
-        """Search access points by any text field."""
+    def search_access_points(self, query: str, fields: List[str] = None) -> List[Dict]:
+        """Search access points by specific fields or all text fields.
+        
+        Args:
+            query: Search term
+            fields: Optional list of fields to search in ['ap_id', 'store_id', 'ip_address']
+                   If None, searches all fields.
+        """
         query_pattern = f"%{query}%"
         with self._get_connection() as conn:
             cursor = conn.cursor()
-            cursor.execute('''
-                SELECT * FROM access_points 
-                WHERE ap_id LIKE ? OR store_id LIKE ? OR store_alias LIKE ? 
-                   OR retail_chain LIKE ? OR ip_address LIKE ? OR type LIKE ? OR notes LIKE ?
-                ORDER BY store_id, ap_id
-            ''', (query_pattern,) * 7)
+            
+            if fields:
+                # Build WHERE clause for specific fields
+                where_clauses = [f"{field} LIKE ?" for field in fields]
+                where_sql = " OR ".join(where_clauses)
+                sql = f'''
+                    SELECT * FROM access_points 
+                    WHERE {where_sql}
+                    ORDER BY store_id, ap_id
+                '''
+                cursor.execute(sql, (query_pattern,) * len(fields))
+            else:
+                # Search all fields
+                cursor.execute('''
+                    SELECT * FROM access_points 
+                    WHERE ap_id LIKE ? OR store_id LIKE ? OR store_alias LIKE ? 
+                       OR retail_chain LIKE ? OR ip_address LIKE ? OR type LIKE ? OR notes LIKE ?
+                    ORDER BY store_id, ap_id
+                ''', (query_pattern,) * 7)
+            
             rows = cursor.fetchall()
             
             result = []

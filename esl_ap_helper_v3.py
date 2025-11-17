@@ -60,7 +60,7 @@ class APHelperV3:
         result = login_dialog.show()
         
         if result:
-            self.current_user = result['username']
+            self.current_user = result  # Store full user dict
             self._start_dashboard()
         else:
             # User canceled login
@@ -87,8 +87,9 @@ class APHelperV3:
         if messagebox.askokcancel("Exit", "Are you sure you want to exit AP Helper v3?"):
             # Log logout
             try:
+                username = self.current_user.get('username') if isinstance(self.current_user, dict) else self.current_user
                 self.db.log_user_activity(
-                    username=self.current_user,
+                    username=username,
                     activity_type='logout',
                     description='User logged out',
                     success=True
