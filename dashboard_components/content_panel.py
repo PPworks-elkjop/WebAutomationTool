@@ -10,12 +10,13 @@ from tkinter import ttk, scrolledtext, messagebox
 class ContentPanel:
     """Lower right panel - Dynamic content display."""
     
-    def __init__(self, parent, db, current_user=None, log_callback=None, refresh_callback=None):
+    def __init__(self, parent, db, current_user=None, log_callback=None, refresh_callback=None, ap_panel=None):
         self.parent = parent
         self.db = db
         self.current_user = current_user
         self.log_callback = log_callback
         self.refresh_callback = refresh_callback
+        self.ap_panel = ap_panel  # Reference to AP panel for browser operations
         
         self.current_content_type = None
         self.current_data = None
@@ -167,7 +168,7 @@ class ContentPanel:
             value = ap_data.get(field, 'N/A')
             self._create_info_row(content, label, value)
         
-        self._log(f"Showing all fields for AP {ap_data['ap_id']}")
+        self._log(f"Showing all fields for AP {ap_data['ap_id']} - COMPLETE")
     
     def show_ssh_terminal(self, ap_id):
         """Show SSH terminal for AP."""
@@ -195,8 +196,97 @@ class ContentPanel:
         
         self._log(f"Opening SSH terminal for AP {ap_id}")
     
-    def show_browser_status(self, ap_id):
+    def show_provisioning_actions(self, ap_data, ap_panel):
+        """Show provisioning actions in content panel."""
+        self._log(f"show_provisioning_actions called for AP {ap_data.get('ap_id')}")
+        self._clear_frame(self.ap_details_frame)
+        self.current_content_type = "provisioning"
+        self.current_data = ap_data
+        
+        ap_id = ap_data.get('ap_id')
+        self.header_label.config(text=f"Provisioning - AP {ap_id}")
+        self.popout_button.pack_forget()
+        self._log(f"Header and frame cleared")
+        
+        content = tk.Frame(self.ap_details_frame, bg="#FFFFFF", padx=30, pady=20)
+        content.pack(fill=tk.BOTH, expand=True)
+        
+        # Header
+        tk.Label(content, text="Provisioning Actions", font=('Segoe UI', 14, 'bold'),
+                bg="#FFFFFF", fg="#212529").pack(pady=(0, 20))
+        
+        # Action buttons
+        actions = [
+            ("Check Status", lambda: ap_panel._provisioning_action(ap_data, 'check')),
+            ("Activate Provisioning", lambda: ap_panel._provisioning_action(ap_data, 'activate')),
+            ("Deactivate Provisioning", lambda: ap_panel._provisioning_action(ap_data, 'deactivate'))
+        ]
+        
+        self._log(f"Creating {len(actions)} provisioning action buttons")
+        for text, command in actions:
+            btn = tk.Button(content, text=text, command=command,
+                     bg="#007BFF", fg="white", font=('Segoe UI', 10, 'bold'),
+                     padx=20, pady=10, relief=tk.FLAT, cursor="hand2",
+                     width=30)
+            btn.pack(pady=8)
+            self._log(f"Created button: {text}")
+        
+        # Back button
+        tk.Button(content, text="← Back to Browser", 
+                 command=lambda: self.show_browser_status(ap_id, ap_data),
+                 bg="#6C757D", fg="white", font=('Segoe UI', 10, 'bold'),
+                 padx=20, pady=10, relief=tk.FLAT, cursor="hand2",
+                 width=30).pack(pady=(20, 0))
+        
+        self._log(f"Showing provisioning actions for AP {ap_id}")
+    
+    def show_ssh_actions(self, ap_data, ap_panel):
+        """Show SSH actions in content panel."""
+        self._clear_frame(self.ap_details_frame)
+        self.current_content_type = "ssh_actions"
+        self.current_data = ap_data
+        
+        ap_id = ap_data.get('ap_id')
+        self.header_label.config(text=f"SSH - AP {ap_id}")
+        self.popout_button.pack_forget()
+        
+        content = tk.Frame(self.ap_details_frame, bg="#FFFFFF", padx=30, pady=20)
+        content.pack(fill=tk.BOTH, expand=True)
+        
+        # Header
+        tk.Label(content, text="SSH Actions", font=('Segoe UI', 14, 'bold'),
+                bg="#FFFFFF", fg="#212529").pack(pady=(0, 20))
+        
+        # Action buttons
+        actions = [
+            ("Check Status", lambda: ap_panel._ssh_action(ap_data, 'check')),
+            ("Activate SSH", lambda: ap_panel._ssh_action(ap_data, 'activate')),
+            ("Deactivate SSH", lambda: ap_panel._ssh_action(ap_data, 'deactivate'))
+        ]
+        
+        for text, command in actions:
+            tk.Button(content, text=text, command=command,
+                     bg="#6F42C1", fg="white", font=('Segoe UI', 10, 'bold'),
+                     padx=20, pady=10, relief=tk.FLAT, cursor="hand2",
+                     width=30).pack(pady=8)
+        
+        # Back button
+        tk.Button(content, text="← Back to Browser", 
+                 command=lambda: self.show_browser_status(ap_id, ap_data),
+                 bg="#6C757D", fg="white", font=('Segoe UI', 10, 'bold'),
+                 padx=20, pady=10, relief=tk.FLAT, cursor="hand2",
+                 width=30).pack(pady=(20, 0))
+        
+        self._log(f"Showing SSH actions for AP {ap_id}")
+    
+    def show_browser_status(self, ap_id, ap_data=None):
         """Show browser connection status (browser runs in external Chrome window)."""
+        # If ap_data not provided or doesn't have _data_collected, get it from ap_panel
+        if not ap_data or '_data_collected' not in ap_data:
+            if self.ap_panel and hasattr(self.ap_panel, 'ap_tabs') and ap_id in self.ap_panel.ap_tabs:
+                ap_data = self.ap_panel.ap_tabs[ap_id]['ap_data']
+                self._log(f"Retrieved ap_data from ap_panel for {ap_id}, data_collected={ap_data.get('_data_collected', False)}")
+        
         self._clear_frame(self.ap_details_frame)
         self.current_content_type = "browser"
         self.current_data = ap_id
@@ -204,25 +294,55 @@ class ContentPanel:
         self.header_label.config(text=f"Browser - AP {ap_id}")
         self.popout_button.pack_forget()  # No popout needed, browser is external
         
-        content = tk.Frame(self.ap_details_frame, bg="#FFFFFF", padx=30, pady=20)
+        # Create scrollable canvas for content
+        canvas = tk.Canvas(self.ap_details_frame, bg="#FFFFFF", highlightthickness=0)
+        scrollbar = tk.Scrollbar(self.ap_details_frame, orient="vertical", command=canvas.yview)
+        scrollable_frame = tk.Frame(canvas, bg="#FFFFFF")
+        
+        scrollable_frame.bind(
+            "<Configure>",
+            lambda e: canvas.configure(scrollregion=canvas.bbox("all"))
+        )
+        
+        canvas.create_window((0, 0), window=scrollable_frame, anchor="nw")
+        canvas.configure(yscrollcommand=scrollbar.set)
+        
+        # Bind mousewheel
+        def _on_mousewheel(event):
+            try:
+                if canvas.winfo_exists():
+                    canvas.yview_scroll(int(-1*(event.delta/120)), "units")
+            except:
+                pass
+        
+        canvas.bind("<Enter>", lambda e: canvas.bind("<MouseWheel>", _on_mousewheel))
+        canvas.bind("<Leave>", lambda e: canvas.unbind("<MouseWheel>"))
+        
+        canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        
+        content = tk.Frame(scrollable_frame, bg="#FFFFFF", padx=30, pady=20)
         content.pack(fill=tk.BOTH, expand=True)
         
-        # Large icon and message
-        icon_frame = tk.Frame(content, bg="#FFFFFF")
-        icon_frame.pack(expand=True)
+        # Add browser operations at top if we have ap_data
+        if ap_data:
+            self._add_browser_operations(content, ap_data)
         
-        tk.Label(icon_frame, text="🌐", font=('Segoe UI', 72),
-                bg="#FFFFFF").pack()
+        # Browser status box (moved under buttons)
+        status_frame = tk.Frame(content, bg="#F8F9FA", relief=tk.SOLID, borderwidth=1)
+        status_frame.pack(fill=tk.X, pady=(10, 0))
         
-        tk.Label(icon_frame, text="Browser Window", font=('Segoe UI', 20, 'bold'),
-                bg="#FFFFFF", fg="#212529").pack(pady=(10, 5))
+        status_label = tk.Label(status_frame, 
+                               text="● Browser Status: " + ("Running" if self.browser_running else "Not Running"),
+                               font=('Segoe UI', 11, 'bold'),
+                               bg="#F8F9FA", 
+                               fg="#28A745" if self.browser_running else "#6C757D",
+                               padx=20, pady=15)
+        status_label.pack()
         
-        tk.Label(icon_frame, text=f"AP {ap_id}", font=('Segoe UI', 14),
-                bg="#FFFFFF", fg="#6C757D").pack()
-        
-        # Info box
+        # Info text box (moved to bottom)
         info_frame = tk.Frame(content, bg="#E7F3FF", relief=tk.SOLID, borderwidth=1)
-        info_frame.pack(fill=tk.X, pady=20, padx=40)
+        info_frame.pack(fill=tk.X, pady=20)
         
         info_text = ("The browser opens in a separate Chrome window.\n\n"
                     "Use the Browser tab controls in the AP panel (top-left)\n"
@@ -232,18 +352,6 @@ class ContentPanel:
         
         tk.Label(info_frame, text=info_text, font=('Segoe UI', 10),
                 bg="#E7F3FF", fg="#004085", justify=tk.CENTER).pack(padx=20, pady=20)
-        
-        # Browser status
-        status_frame = tk.Frame(content, bg="#F8F9FA", relief=tk.SOLID, borderwidth=1)
-        status_frame.pack(fill=tk.X, padx=40)
-        
-        status_label = tk.Label(status_frame, 
-                               text="● Browser Status: " + ("Running" if self.browser_running else "Not Running"),
-                               font=('Segoe UI', 11, 'bold'),
-                               bg="#F8F9FA", 
-                               fg="#28A745" if self.browser_running else "#6C757D",
-                               padx=20, pady=15)
-        status_label.pack()
         
         self._log(f"Showing browser status for AP {ap_id}")
     
@@ -685,16 +793,111 @@ class ContentPanel:
         
         self._log(f"Showing note: {note_data.get('headline')}")
     
+    def _add_browser_operations(self, parent, ap_data):
+        """Add browser operations buttons below AP details."""
+        # Check if browser is running AND data has been collected
+        # Data is considered collected when we have navigated to status page
+        data_collected = ap_data.get('_data_collected', False)
+        buttons_enabled = self.browser_running and data_collected
+        
+        self._log(f"Adding browser operations for AP {ap_data.get('ap_id', 'unknown')} (browser_running={self.browser_running}, data_collected={data_collected})")
+        
+        # No separator at top anymore since this is at the top
+        
+        # Browser operations header
+        ops_header = tk.Frame(parent, bg="#FFFFFF")
+        ops_header.pack(fill=tk.X, pady=(0, 10))
+        
+        tk.Label(ops_header, text="🌐", font=('Segoe UI', 16),
+                bg="#FFFFFF").pack(side=tk.LEFT, padx=(0, 8))
+        
+        tk.Label(ops_header, text="Browser Window", font=('Segoe UI', 11, 'bold'),
+                bg="#FFFFFF", fg="#212529").pack(side=tk.LEFT)
+        
+        self._log("Browser operations: Header added")
+        
+        # Navigation group
+        nav_frame = tk.Frame(parent, bg="#F8F9FA", padx=10, pady=10)
+        nav_frame.pack(fill=tk.X, pady=(0, 8))
+        
+        tk.Label(nav_frame, text="Navigation", font=('Segoe UI', 9, 'bold'),
+                bg="#F8F9FA", fg="#495057").pack(anchor="w", pady=(0, 6))
+        
+        nav_btn_frame = tk.Frame(nav_frame, bg="#F8F9FA")
+        nav_btn_frame.pack(fill=tk.X)
+        
+        nav_operations = [
+            ("📊 Status", lambda: self._browser_operation(ap_data, 'nav_status')),
+            ("🔧 Provisioning", lambda: self._browser_operation(ap_data, 'provisioning')),
+            ("💻 SSH", lambda: self._browser_operation(ap_data, 'ssh')),
+        ]
+        
+        for i, (op_text, op_cmd) in enumerate(nav_operations):
+            btn = tk.Button(nav_btn_frame, text=op_text, command=op_cmd,
+                          bg="#007BFF", fg="white", font=('Segoe UI', 8),
+                          padx=10, pady=4, relief=tk.FLAT, cursor="hand2",
+                          borderwidth=0, state=tk.NORMAL if buttons_enabled else tk.DISABLED,
+                          activebackground="#0069D9")
+            btn.pack(side=tk.LEFT, padx=(0, 5) if i < len(nav_operations)-1 else 0)
+            
+            # Store reference
+            if 'browser_ops_btns' not in ap_data:
+                ap_data['browser_ops_btns'] = []
+            ap_data['browser_ops_btns'].append(btn)
+        
+        self._log(f"Browser operations: Added {len(nav_operations)} navigation buttons")
+        
+        # Actions group
+        action_frame = tk.Frame(parent, bg="#F8F9FA", padx=10, pady=10)
+        action_frame.pack(fill=tk.X, pady=(0, 10))
+        
+        tk.Label(action_frame, text="Actions", font=('Segoe UI', 9, 'bold'),
+                bg="#F8F9FA", fg="#495057").pack(anchor="w", pady=(0, 6))
+        
+        action_btn_frame = tk.Frame(action_frame, bg="#F8F9FA")
+        action_btn_frame.pack(fill=tk.X)
+        
+        action_operations = [
+            ("🔄 Refresh", lambda: self._browser_operation(ap_data, 'refresh')),
+            ("📸 Screenshot", lambda: self._browser_operation(ap_data, 'screenshot')),
+            ("📄 View Source", lambda: self._browser_operation(ap_data, 'view_source')),
+        ]
+        
+        for i, (op_text, op_cmd) in enumerate(action_operations):
+            btn = tk.Button(action_btn_frame, text=op_text, command=op_cmd,
+                          bg="#6C757D", fg="white", font=('Segoe UI', 8),
+                          padx=10, pady=4, relief=tk.FLAT, cursor="hand2",
+                          borderwidth=0, state=tk.NORMAL if buttons_enabled else tk.DISABLED,
+                          activebackground="#5A6268")
+            btn.pack(side=tk.LEFT, padx=(0, 5) if i < len(action_operations)-1 else 0)
+            
+            # Store reference
+            ap_data['browser_ops_btns'].append(btn)
+        
+        self._log(f"Browser operations: Added {len(action_operations)} action buttons - COMPLETE")
+    
+    def _browser_operation(self, ap_data, operation):
+        """Handle browser operation button clicks - delegate to AP panel."""
+        if self.ap_panel:
+            self.ap_panel._browser_action(ap_data, operation)
+        else:
+            self._log(f"Error: AP panel reference not set, cannot execute {operation}")
+    
     def _create_info_row(self, parent, label, value):
-        """Create an information row."""
+        """Create an information row with copyable text."""
         row = tk.Frame(parent, bg="#FFFFFF")
         row.pack(fill=tk.X, pady=3)
         
         tk.Label(row, text=f"{label}:", font=('Segoe UI', 10, 'bold'),
                 bg="#FFFFFF", fg="#495057", width=30, anchor="w").pack(side=tk.LEFT)
         
-        tk.Label(row, text=str(value), font=('Segoe UI', 10),
-                bg="#FFFFFF", fg="#212529", anchor="w").pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(15, 0))
+        # Use Entry widget for copyable text
+        value_entry = tk.Entry(row, font=('Segoe UI', 10),
+                              bd=0, relief=tk.FLAT, highlightthickness=0,
+                              readonlybackground="#FFFFFF", fg="#212529")
+        value_entry.insert(0, str(value))
+        value_entry.config(state='readonly')
+        value_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(15, 0))
     
     def _create_note_item(self, parent, note, ap_id):
         """Create a note item in 2-row format (date/user/replies, then headline)."""
@@ -1332,6 +1535,19 @@ class ContentPanel:
                 def update_ui():
                     if result.get('status') == 'success':
                         self._log(f"✓ Successfully opened AP {ap_data.get('ap_id')}")
+                        # Mark data as collected so buttons can be enabled
+                        ap_data['_data_collected'] = True
+                        
+                        # Also update the ap_data stored in ap_panel
+                        if self.ap_panel and hasattr(self.ap_panel, 'ap_tabs'):
+                            ap_id = ap_data.get('ap_id')
+                            if ap_id in self.ap_panel.ap_tabs:
+                                self.ap_panel.ap_tabs[ap_id]['ap_data']['_data_collected'] = True
+                                self._log(f"Set _data_collected flag for AP {ap_id}")
+                        
+                        # Refresh the browser status view to update button states
+                        if self.current_content_type == 'browser':
+                            self.show_browser_status(ap_data.get('ap_id'), ap_data)
                         # Don't show success popup - just log it
                     else:
                         self._log(f"✗ Failed to open AP: {result.get('message')}")
@@ -1407,8 +1623,9 @@ class ContentPanel:
                         driver.execute_script("arguments[0].click();", proceed_btn)
                         self._log("✓ Clicked PROCEED button (JavaScript)")
                     
-                    # Wait then refresh to proceed past CATO warning
-                    time.sleep(2)
+                    # Wait 5 seconds then refresh
+                    self._log("Waiting 5 seconds before refresh...")
+                    time.sleep(5)
                     
                     try:
                         driver.refresh()

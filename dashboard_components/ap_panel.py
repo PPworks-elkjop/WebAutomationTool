@@ -258,6 +258,10 @@ class APPanel:
         # Notify parent
         if self.on_ap_change:
             self.on_ap_change(ap_id, ap_data)
+        
+        # Show AP overview in content panel by default (since Overview tab is selected)
+        if self.content_panel:
+            self.content_panel.show_ap_overview(ap_data)
     
     def _create_embedded_ap_support(self, parent, ap_data):
         """Create embedded AP support interface (simplified from APSupportWindowModern)."""
@@ -543,44 +547,6 @@ class APPanel:
         ap_data['browser_maximize_btn'] = maximize_btn
         ap_data['browser_minimize_btn'] = minimize_btn
         
-        # Operations section (below control panel)
-        ops_frame = tk.Frame(content, bg="#F8F9FA", padx=10, pady=10)
-        ops_frame.pack(fill=tk.X, pady=(0, 10))
-        
-        tk.Label(ops_frame, text="Browser Operations", font=('Segoe UI', 11, 'bold'),
-                bg="#F8F9FA", fg="#212529").pack(anchor="w", pady=(0, 8))
-        
-        # Operations buttons
-        ops_btn_frame = tk.Frame(ops_frame, bg="#F8F9FA")
-        ops_btn_frame.pack(fill=tk.X)
-        
-        operations = [
-            ("Navigate to Status", lambda: self._browser_action(ap_data, 'nav_status')),
-            ("Provisioning", lambda: self._browser_action(ap_data, 'provisioning')),
-            ("SSH Terminal", lambda: self._browser_action(ap_data, 'ssh')),
-            ("Refresh Page", lambda: self._browser_action(ap_data, 'refresh')),
-            ("Take Screenshot", lambda: self._browser_action(ap_data, 'screenshot')),
-            ("View Page Source", lambda: self._browser_action(ap_data, 'view_source'))
-        ]
-        
-        # Pack buttons in rows (3 per row)
-        current_row = None
-        for i, (op_text, op_cmd) in enumerate(operations):
-            if i % 3 == 0:
-                current_row = tk.Frame(ops_btn_frame, bg="#F8F9FA")
-                current_row.pack(fill=tk.X, pady=(0, 5) if i < len(operations)-3 else 0)
-            
-            btn = tk.Button(current_row, text=op_text, command=op_cmd,
-                          bg="#6C757D", fg="white", font=('Segoe UI', 9),
-                          padx=12, pady=6, relief=tk.FLAT, cursor="hand2",
-                          borderwidth=0, state=tk.DISABLED, activebackground="#5A6268")
-            btn.pack(side=tk.LEFT, padx=(0, 5) if (i % 3) < 2 else 0)
-            
-            # Store references to enable/disable them
-            if 'browser_ops_btns' not in ap_data:
-                ap_data['browser_ops_btns'] = []
-            ap_data['browser_ops_btns'].append(btn)
-        
         # Info box
         info_frame = tk.Frame(content, bg="#E7F3FF", relief=tk.SOLID, borderwidth=1)
         info_frame.pack(fill=tk.X, pady=10)
@@ -652,9 +618,8 @@ class APPanel:
                 ap_data.get('browser_maximize_btn', tk.Button()).config(state=tk.NORMAL)
                 ap_data.get('browser_minimize_btn', tk.Button()).config(state=tk.NORMAL)
                 
-                # Enable operation buttons
-                for btn in ap_data.get('browser_ops_btns', []):
-                    btn.config(state=tk.NORMAL)
+                # Notify content panel to update with browser operations
+                self.content_panel.show_ap_overview(ap_data)
                 
         elif action == 'stop':
             if messagebox.askyesno("Stop Browser", 
@@ -671,9 +636,8 @@ class APPanel:
                 ap_data.get('browser_maximize_btn', tk.Button()).config(state=tk.DISABLED)
                 ap_data.get('browser_minimize_btn', tk.Button()).config(state=tk.DISABLED)
                 
-                # Disable operation buttons
-                for btn in ap_data.get('browser_ops_btns', []):
-                    btn.config(state=tk.DISABLED)
+                # Notify content panel to update
+                self.content_panel.show_ap_overview(ap_data)
                 
         elif action == 'open_ap':
             self.content_panel.open_ap_in_browser(ap_data)
@@ -692,9 +656,11 @@ class APPanel:
             
         elif action == 'provisioning':
             self._show_provisioning_dialog(ap_data)
+            return  # Don't trigger tab change, provisioning view will handle its own display
             
         elif action == 'ssh':
             self._show_ssh_dialog(ap_data)
+            return  # Don't trigger tab change, SSH view will handle its own display
             
         elif action == 'maximize':
             self._browser_maximize()
@@ -731,33 +697,16 @@ class APPanel:
                         def log_nav():
                             self._log(f"Navigated to status page: {url}")
                         self.parent.after(0, log_nav)
-                        
-                        # Wait longer for page to fully load before collecting data
-                        import time
-                        time.sleep(4)
-                        
-                        # Collect data from the status page
-                        result = self.content_panel.browser_manager.collect_current_page_data(ap_data.get('ap_id'))
-                        
-                        def show_result():
-                            if result.get('status') == 'success':
-                                msg = result.get('message', 'Data collected')
-                                self._log(f"✓ {msg}")
-                                messagebox.showinfo("Success", msg, parent=self.parent)
-                            else:
-                                msg = result.get('message', 'Failed to collect data')
-                                self._log(f"✗ {msg}")
-                        self.parent.after(0, show_result)
                     
                     elif page == 'provisioning':
-                        url = f"https://{ip}/service/provisioning.xml"
+                        url = f"https://{ip}/service/config/provisioningEnabled.xml"
                         driver.get(url)
                         def log_nav():
                             self._log(f"Navigated to provisioning page: {url}")
                         self.parent.after(0, log_nav)
                     
                     elif page == 'ssh':
-                        url = f"https://{ip}/service/ssh.html"
+                        url = f"https://{ip}/service/config/ssh.xml"
                         driver.get(url)
                         def log_nav():
                             self._log(f"Navigated to SSH page: {url}")
@@ -779,97 +728,342 @@ class APPanel:
             messagebox.showerror("Error", f"Navigation failed:\n{str(e)}", parent=self.parent)
     
     def _show_provisioning_dialog(self, ap_data):
-        """Show provisioning action dialog."""
+        """Show provisioning actions in content panel."""
+        self._log(f"_show_provisioning_dialog called for AP {ap_data.get('ap_id')}")
         if not self.content_panel or not self.content_panel.browser_manager:
+            self._log("Error: Browser not running or content panel not available")
             messagebox.showerror("Error", "Browser not running", parent=self.parent)
             return
         
-        dialog = tk.Toplevel(self.parent)
-        dialog.title(f"Provisioning - AP {ap_data.get('ap_id')}")
-        dialog.geometry("400x300")
-        dialog.resizable(False, False)
-        dialog.transient(self.parent)
-        dialog.grab_set()
-        
-        main_frame = tk.Frame(dialog, bg="#FFFFFF", padx=20, pady=20)
-        main_frame.pack(fill=tk.BOTH, expand=True)
-        
-        tk.Label(main_frame, text="Provisioning Actions", 
-                font=('Segoe UI', 12, 'bold'), bg="#FFFFFF").pack(pady=(0, 20))
-        
-        # Action buttons
-        actions = [
-            ("Check Status", lambda: self._provisioning_action(ap_data, 'check', dialog)),
-            ("Activate Provisioning", lambda: self._provisioning_action(ap_data, 'activate', dialog)),
-            ("Deactivate Provisioning", lambda: self._provisioning_action(ap_data, 'deactivate', dialog))
-        ]
-        
-        for text, command in actions:
-            tk.Button(main_frame, text=text, command=command,
-                     bg="#007BFF", fg="white", font=('Segoe UI', 10, 'bold'),
-                     padx=20, pady=10, relief=tk.FLAT, cursor="hand2",
-                     width=25).pack(pady=5)
-        
-        tk.Button(main_frame, text="Close", command=dialog.destroy,
-                 bg="#6C757D", fg="white", font=('Segoe UI', 10, 'bold'),
-                 padx=20, pady=10, relief=tk.FLAT, cursor="hand2",
-                 width=25).pack(pady=(15, 0))
+        self._log("Calling content_panel.show_provisioning_actions")
+        # Show provisioning actions in content panel
+        self.content_panel.show_provisioning_actions(ap_data, self)
     
     def _show_ssh_dialog(self, ap_data):
-        """Show SSH action dialog."""
+        """Show SSH actions in content panel."""
         if not self.content_panel or not self.content_panel.browser_manager:
             messagebox.showerror("Error", "Browser not running", parent=self.parent)
             return
         
-        dialog = tk.Toplevel(self.parent)
-        dialog.title(f"SSH - AP {ap_data.get('ap_id')}")
-        dialog.geometry("400x300")
-        dialog.resizable(False, False)
-        dialog.transient(self.parent)
-        dialog.grab_set()
-        
-        main_frame = tk.Frame(dialog, bg="#FFFFFF", padx=20, pady=20)
-        main_frame.pack(fill=tk.BOTH, expand=True)
-        
-        tk.Label(main_frame, text="SSH Actions", 
-                font=('Segoe UI', 12, 'bold'), bg="#FFFFFF").pack(pady=(0, 20))
-        
-        # Action buttons
-        actions = [
-            ("Check Status", lambda: self._ssh_action(ap_data, 'check', dialog)),
-            ("Activate SSH", lambda: self._ssh_action(ap_data, 'activate', dialog)),
-            ("Deactivate SSH", lambda: self._ssh_action(ap_data, 'deactivate', dialog))
-        ]
-        
-        for text, command in actions:
-            tk.Button(main_frame, text=text, command=command,
-                     bg="#6F42C1", fg="white", font=('Segoe UI', 10, 'bold'),
-                     padx=20, pady=10, relief=tk.FLAT, cursor="hand2",
-                     width=25).pack(pady=5)
-        
-        tk.Button(main_frame, text="Close", command=dialog.destroy,
-                 bg="#6C757D", fg="white", font=('Segoe UI', 10, 'bold'),
-                 padx=20, pady=10, relief=tk.FLAT, cursor="hand2",
-                 width=25).pack(pady=(15, 0))
+        # Show SSH actions in content panel
+        self.content_panel.show_ssh_actions(ap_data, self)
     
-    def _provisioning_action(self, ap_data, action, dialog):
+    def _provisioning_action(self, ap_data, action):
         """Handle provisioning actions."""
-        dialog.destroy()
         self._log(f"Provisioning {action} for AP {ap_data.get('ap_id')}")
-        # TODO: Implement actual provisioning logic
-        messagebox.showinfo("Provisioning", f"Provisioning {action} - Implementation pending", parent=self.parent)
+        
+        if not self.content_panel or not self.content_panel.browser_manager:
+            messagebox.showerror("Error", "Browser not running", parent=self.parent)
+            return
+        
+        import threading
+        
+        def perform_action():
+            try:
+                from selenium.webdriver.common.by import By
+                import time
+                
+                driver = self.content_panel.browser_manager.driver
+                ip = ap_data.get('ip_address', '').strip()
+                if ip.startswith('http'):
+                    ip = ip.split('://')[1]
+                if '@' in ip:
+                    ip = ip.split('@')[1]
+                
+                url = f"https://{ip}/service/config/provisioningEnabled.xml"
+                
+                def log(msg):
+                    self.parent.after(0, lambda: self._log(msg))
+                
+                log(f"Navigating to {url}")
+                driver.get(url)
+                time.sleep(2)
+                
+                # Find the checkbox
+                checkboxes = driver.find_elements(By.NAME, "provisioningEnabled")
+                provisioning_checkbox = None
+                for cb in checkboxes:
+                    if cb.get_attribute("type") == "checkbox":
+                        provisioning_checkbox = cb
+                        break
+                
+                if not provisioning_checkbox:
+                    log("✗ Could not find provisioning checkbox")
+                    return
+                
+                is_enabled = provisioning_checkbox.is_selected()
+                
+                if action == 'check':
+                    status = 'Enabled' if is_enabled else 'Disabled'
+                    log(f"Provisioning status: {status}")
+                    def show_msg():
+                        messagebox.showinfo("Provisioning Status", 
+                                          f"Provisioning is currently: {status}",
+                                          parent=self.parent)
+                    self.parent.after(0, show_msg)
+                    return
+                
+                elif action == 'activate':
+                    if is_enabled:
+                        log("Provisioning is already enabled")
+                        return
+                    
+                    log("Enabling provisioning...")
+                    try:
+                        provisioning_checkbox.click()
+                    except:
+                        driver.execute_script("arguments[0].click();", provisioning_checkbox)
+                    time.sleep(1)
+                    
+                    # Click save
+                    save_button = driver.find_element(By.CSS_SELECTOR, "input[type='submit'][value='Save']")
+                    try:
+                        save_button.click()
+                    except:
+                        driver.execute_script("arguments[0].click();", save_button)
+                    time.sleep(2)
+                    
+                    log("✓ Provisioning enabled")
+                    def show_success():
+                        messagebox.showinfo("Success", "Provisioning has been enabled", parent=self.parent)
+                    self.parent.after(0, show_success)
+                
+                elif action == 'deactivate':
+                    if not is_enabled:
+                        log("Provisioning is already disabled")
+                        return
+                    
+                    log("Disabling provisioning...")
+                    try:
+                        provisioning_checkbox.click()
+                    except:
+                        driver.execute_script("arguments[0].click();", provisioning_checkbox)
+                    time.sleep(1)
+                    
+                    # Click save
+                    save_button = driver.find_element(By.CSS_SELECTOR, "input[type='submit'][value='Save']")
+                    try:
+                        save_button.click()
+                    except:
+                        driver.execute_script("arguments[0].click();", save_button)
+                    time.sleep(2)
+                    
+                    log("✓ Provisioning disabled")
+                    def show_success():
+                        messagebox.showinfo("Success", "Provisioning has been disabled", parent=self.parent)
+                    self.parent.after(0, show_success)
+                    
+            except Exception as e:
+                error_msg = f"Provisioning error: {str(e)}"
+                def show_error():
+                    self._log(error_msg)
+                    messagebox.showerror("Error", f"Operation failed:\n{str(e)}", parent=self.parent)
+                self.parent.after(0, show_error)
+        
+        # Run in background thread
+        thread = threading.Thread(target=perform_action, daemon=True)
+        thread.start()
     
-    def _ssh_action(self, ap_data, action, dialog):
+    def _ssh_action(self, ap_data, action):
         """Handle SSH actions with provisioning coordination."""
-        dialog.destroy()
         self._log(f"SSH {action} for AP {ap_data.get('ap_id')}")
         
-        if action == 'check':
-            # Just check status
-            self._browser_navigate(ap_data, 'ssh')
-        elif action in ['activate', 'deactivate']:
-            # TODO: Implement with provisioning handling
-            messagebox.showinfo("SSH", f"SSH {action} - Implementation pending", parent=self.parent)
+        if not self.content_panel or not self.content_panel.browser_manager:
+            messagebox.showerror("Error", "Browser not running", parent=self.parent)
+            return
+        
+        import threading
+        
+        def perform_action():
+            try:
+                from selenium.webdriver.common.by import By
+                import time
+                
+                driver = self.content_panel.browser_manager.driver
+                ip = ap_data.get('ip_address', '').strip()
+                if ip.startswith('http'):
+                    ip = ip.split('://')[1]
+                if '@' in ip:
+                    ip = ip.split('@')[1]
+                
+                url = f"https://{ip}/service/config/ssh.xml"
+                
+                def log(msg):
+                    self.parent.after(0, lambda: self._log(msg))
+                
+                log(f"Navigating to {url}")
+                driver.get(url)
+                time.sleep(2)
+                
+                # Find the SSH checkbox
+                ssh_checkboxes = driver.find_elements(By.NAME, "enabled")
+                ssh_checkbox = None
+                for cb in ssh_checkboxes:
+                    if cb.get_attribute("type") == "checkbox":
+                        ssh_checkbox = cb
+                        break
+                
+                if not ssh_checkbox:
+                    log("✗ Could not find SSH checkbox")
+                    return
+                
+                is_enabled = ssh_checkbox.is_selected()
+                is_disabled = ssh_checkbox.get_attribute("disabled")
+                
+                if action == 'check':
+                    status = 'Enabled' if is_enabled else 'Disabled'
+                    accessible = 'accessible' if not is_disabled else 'disabled (provisioning must be disabled first)'
+                    log(f"SSH status: {status} (checkbox {accessible})")
+                    def show_msg():
+                        msg = f"SSH is currently: {status}\n\n"
+                        if is_disabled:
+                            msg += "Note: SSH checkbox is disabled.\nProvisioning must be disabled before SSH can be modified."
+                        messagebox.showinfo("SSH Status", msg, parent=self.parent)
+                    self.parent.after(0, show_msg)
+                    return
+                
+                elif action == 'activate':
+                    if is_enabled:
+                        log("SSH is already enabled")
+                        return
+                    
+                    # Track if provisioning was originally enabled
+                    provisioning_was_enabled = False
+                    
+                    # Check if we need to disable provisioning first
+                    if is_disabled:
+                        log("SSH checkbox is disabled - checking provisioning status...")
+                        
+                        # Check provisioning status
+                        prov_url = f"https://{ip}/service/config/provisioningEnabled.xml"
+                        driver.get(prov_url)
+                        time.sleep(2)
+                        
+                        prov_checkboxes = driver.find_elements(By.NAME, "provisioningEnabled")
+                        prov_checkbox = None
+                        for cb in prov_checkboxes:
+                            if cb.get_attribute("type") == "checkbox":
+                                prov_checkbox = cb
+                                break
+                        
+                        if prov_checkbox and prov_checkbox.is_selected():
+                            provisioning_was_enabled = True
+                            log("Provisioning is enabled - will be restored after SSH activation")
+                            log("Disabling provisioning...")
+                            try:
+                                prov_checkbox.click()
+                            except:
+                                driver.execute_script("arguments[0].click();", prov_checkbox)
+                            time.sleep(1)
+                            
+                            save_btn = driver.find_element(By.CSS_SELECTOR, "input[type='submit'][value='Save']")
+                            try:
+                                save_btn.click()
+                            except:
+                                driver.execute_script("arguments[0].click();", save_btn)
+                            time.sleep(3)
+                            log("✓ Provisioning disabled")
+                        
+                        # Return to SSH page
+                        driver.get(url)
+                        time.sleep(2)
+                        
+                        # Find SSH checkbox again
+                        ssh_checkboxes = driver.find_elements(By.NAME, "enabled")
+                        ssh_checkbox = None
+                        for cb in ssh_checkboxes:
+                            if cb.get_attribute("type") == "checkbox":
+                                ssh_checkbox = cb
+                                break
+                    
+                    log("Enabling SSH...")
+                    try:
+                        ssh_checkbox.click()
+                    except:
+                        driver.execute_script("arguments[0].click();", ssh_checkbox)
+                    time.sleep(1)
+                    
+                    # Click save
+                    save_button = driver.find_element(By.CSS_SELECTOR, "input[type='submit'][value='Save']")
+                    try:
+                        save_button.click()
+                    except:
+                        driver.execute_script("arguments[0].click();", save_button)
+                    time.sleep(2)
+                    
+                    log("✓ SSH enabled")
+                    
+                    # Re-enable provisioning if it was originally enabled
+                    if provisioning_was_enabled:
+                        log("Re-enabling provisioning to restore original state...")
+                        prov_url = f"https://{ip}/service/config/provisioningEnabled.xml"
+                        driver.get(prov_url)
+                        time.sleep(2)
+                        
+                        prov_checkboxes = driver.find_elements(By.NAME, "provisioningEnabled")
+                        prov_checkbox = None
+                        for cb in prov_checkboxes:
+                            if cb.get_attribute("type") == "checkbox":
+                                prov_checkbox = cb
+                                break
+                        
+                        if prov_checkbox and not prov_checkbox.is_selected():
+                            try:
+                                prov_checkbox.click()
+                            except:
+                                driver.execute_script("arguments[0].click();", prov_checkbox)
+                            time.sleep(1)
+                            
+                            save_btn = driver.find_element(By.CSS_SELECTOR, "input[type='submit'][value='Save']")
+                            try:
+                                save_btn.click()
+                            except:
+                                driver.execute_script("arguments[0].click();", save_btn)
+                            time.sleep(2)
+                            log("✓ Provisioning re-enabled")
+                    
+                    def show_success():
+                        msg = "SSH has been enabled"
+                        if provisioning_was_enabled:
+                            msg += "\n\nProvisioning has been restored to its original state (enabled)."
+                        messagebox.showinfo("Success", msg, parent=self.parent)
+                    self.parent.after(0, show_success)
+                
+                elif action == 'deactivate':
+                    if not is_enabled:
+                        log("SSH is already disabled")
+                        return
+                    
+                    log("Disabling SSH...")
+                    try:
+                        ssh_checkbox.click()
+                    except:
+                        driver.execute_script("arguments[0].click();", ssh_checkbox)
+                    time.sleep(1)
+                    
+                    # Click save
+                    save_button = driver.find_element(By.CSS_SELECTOR, "input[type='submit'][value='Save']")
+                    try:
+                        save_button.click()
+                    except:
+                        driver.execute_script("arguments[0].click();", save_button)
+                    time.sleep(2)
+                    
+                    log("✓ SSH disabled")
+                    def show_success():
+                        messagebox.showinfo("Success", "SSH has been disabled", parent=self.parent)
+                    self.parent.after(0, show_success)
+                    
+            except Exception as e:
+                error_msg = f"SSH error: {str(e)}"
+                def show_error():
+                    self._log(error_msg)
+                    messagebox.showerror("Error", f"Operation failed:\n{str(e)}", parent=self.parent)
+                self.parent.after(0, show_error)
+        
+        # Run in background thread
+        thread = threading.Thread(target=perform_action, daemon=True)
+        thread.start()
     
     def _toggle_ssh_server(self, ap_data, enable):
         """Toggle SSH server on/off via browser automation."""
@@ -1020,7 +1214,12 @@ class APPanel:
             dialog.title(f"Page Source - AP {ap_data.get('ap_id')}")
             dialog.geometry("800x600")
             dialog.transient(self.parent)
-            dialog.grab_set()
+            
+            # Try to grab focus, but don't fail if another window has it
+            try:
+                dialog.grab_set()
+            except:
+                pass
             
             # Text widget with scrollbar
             text_frame = tk.Frame(dialog)
@@ -1040,13 +1239,6 @@ class APPanel:
         except Exception as e:
             self._log(f"View source error: {str(e)}")
             messagebox.showerror("Error", f"Failed to view source:\n{str(e)}", parent=self.parent)
-    
-    def _ssh_action(self, ap_data, action):
-        """Handle SSH actions."""
-        self._log(f"SSH action: {action} for AP {ap_data['ap_id']}")
-        # Notify parent to show SSH in content panel
-        if self.on_tab_change:
-            self.on_tab_change(ap_data['ap_id'], "SSH Terminal")
     
     def _on_notebook_tab_changed(self, event):
         """Handle notebook tab change."""

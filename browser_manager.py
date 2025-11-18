@@ -2,10 +2,23 @@
 Browser Manager - Handles multi-AP browser automation
 """
 import time
+import os
+import sys
 from datetime import datetime
 from selenium import webdriver
 from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.chrome.options import Options
+
+# Suppress all console windows and logging on Windows
+if sys.platform == 'win32':
+    os.environ['WDM_LOG_LEVEL'] = '0'
+    os.environ['WDM_PRINT_FIRST_LINE'] = 'False'
+    os.environ['WDM_PROGRESS_BAR'] = str(False)
+    
+    # Suppress Python logging for webdriver_manager
+    import logging
+    logging.getLogger('WDM').setLevel(logging.NOTSET)
+
 from webdriver_manager.chrome import ChromeDriverManager
 
 
@@ -45,6 +58,10 @@ class BrowserManager:
         """Initialize Chrome browser with appropriate options"""
         self.log("Initializing Chrome driver...")
         
+        import os
+        import subprocess
+        import sys
+        
         chrome_options = Options()
         chrome_options.add_argument('--disable-gpu')
         chrome_options.add_argument('--no-sandbox')
@@ -56,14 +73,28 @@ class BrowserManager:
         chrome_options.add_experimental_option('excludeSwitches', ['enable-logging'])
         chrome_options.set_capability('acceptInsecureCerts', True)
         
-        service = Service(ChromeDriverManager().install())
+        # Suppress all console windows on Windows
+        creation_flags = 0
+        if sys.platform == 'win32':
+            # CREATE_NO_WINDOW flag to prevent console window
+            creation_flags = subprocess.CREATE_NO_WINDOW
+            # Also set environment to suppress webdriver_manager console output
+            os.environ['WDM_LOG_LEVEL'] = '0'
+            os.environ['WDM_PRINT_FIRST_LINE'] = 'False'
+        
+        # Create service with hidden console window
+        service = Service(
+            ChromeDriverManager().install(),
+            creationflags=creation_flags
+        )
+        
         self.driver = webdriver.Chrome(service=service, options=chrome_options)
         
         # Set page load timeout to 60 seconds (increased for slower connections)
         self.driver.set_page_load_timeout(60)
         self.driver.implicitly_wait(15)
         
-        # Minimize the browser window
+        # Minimize the browser window immediately
         try:
             self.driver.minimize_window()
             self.log("✓ Browser window minimized")
@@ -534,8 +565,8 @@ class BrowserManager:
             return {'status': 'error', 'message': 'Database not configured'}
         
         try:
-            from credentials_manager import CredentialsManager
-            creds_manager = CredentialsManager(self.db)
+            from credential_manager_v2 import CredentialManager
+            creds_manager = CredentialManager()
             
             page_source = self.driver.page_source
             

@@ -63,6 +63,9 @@ class DashboardMain:
         
         # Load saved pane positions
         self.root.after(100, self._load_pane_positions)
+        
+        # Start auto-refresh timer (check for credential updates every minute)
+        self.root.after(60000, self._auto_refresh_credentials)
     
     def _create_menu(self):
         """Create custom menu bar with buttons (modern styling with full control)."""
@@ -293,6 +296,9 @@ class DashboardMain:
             content_panel=self.content_panel
         )
         
+        # Set ap_panel reference in content_panel for browser operations
+        self.content_panel.ap_panel = self.ap_panel
+        
         # === UPPER RIGHT: Context Panel ===
         context_frame = ttk.Frame(self.upper_paned, relief=tk.RIDGE, borderwidth=1)
         self.upper_paned.add(context_frame, minsize=400)
@@ -338,7 +344,7 @@ class DashboardMain:
         if tab_name == "SSH Terminal":
             self.content_panel.show_ssh_terminal(ap_id)
         elif tab_name == "Browser":
-            self.content_panel.show_browser_status(ap_id)
+            self.content_panel.show_browser_status(ap_id, self.active_ap)
         elif tab_name == "Notes":
             self.content_panel.show_notes(ap_id)
         elif tab_name == "Overview":
@@ -496,6 +502,8 @@ class DashboardMain:
             except:
                 pass
         
+        # Force update before saving to ensure pane positions are current
+        self.root.update_idletasks()
         self._save_window_state()
         self.root.quit()
         self.root.destroy()
@@ -540,16 +548,16 @@ class DashboardMain:
                     # Restore upper paned window position (horizontal split)
                     # Default to 600 if not set or too small
                     upper_pos = config.get('upper_pane_pos', 600)
-                    if upper_pos < 400:  # Increased minimum from 300 to 400
-                        upper_pos = 600
+                    if upper_pos < 250:  # Minimum 250px to prevent too small
+                        upper_pos = 400
                     self.upper_paned.sash_place(0, upper_pos, 0)
                     print(f"Upper pane position set to: {upper_pos}")
                     
                     # Restore lower paned window position (horizontal split)
                     # Default to 600 if not set or too small
                     lower_pos = config.get('lower_pane_pos', 600)
-                    if lower_pos < 400:  # Increased minimum from 300 to 400
-                        lower_pos = 600
+                    if lower_pos < 250:  # Minimum 250px to prevent too small
+                        lower_pos = 400
                     self.lower_paned.sash_place(0, lower_pos, 0)
                     print(f"Lower pane position set to: {lower_pos}")
             else:
@@ -593,20 +601,20 @@ class DashboardMain:
                 
             if hasattr(self, 'upper_paned'):
                 upper_pos = self.upper_paned.sash_coord(0)[0]
-                # Don't save if position is too small
-                if upper_pos >= 400:
+                # Don't save if position is too small (minimum 250px)
+                if upper_pos >= 250:
                     config['upper_pane_pos'] = upper_pos
                 else:
-                    config['upper_pane_pos'] = 600
+                    config['upper_pane_pos'] = 400
                 print(f"Saving upper pane: {config['upper_pane_pos']}")
                 
             if hasattr(self, 'lower_paned'):
                 lower_pos = self.lower_paned.sash_coord(0)[0]
-                # Don't save if position is too small
-                if lower_pos >= 400:
+                # Don't save if position is too small (minimum 250px)
+                if lower_pos >= 250:
                     config['lower_pane_pos'] = lower_pos
                 else:
-                    config['lower_pane_pos'] = 600
+                    config['lower_pane_pos'] = 400
                 print(f"Saving lower pane: {config['lower_pane_pos']}")
             
             config_file = self._get_config_file()
@@ -855,6 +863,47 @@ class DashboardMain:
                            "AP registration functionality will be added here.\n\n"
                            "For now, use the database management tools.",
                            parent=self.root)
+    
+    def _auto_refresh_credentials(self):
+        """Auto-refresh AP data from database every minute."""
+        try:
+            # Check if window still exists
+            if not self.root.winfo_exists():
+                return
+            
+            # Refresh currently active AP data
+            if self.active_ap and 'ap_id' in self.active_ap:
+                ap_id = self.active_ap['ap_id']
+                
+                # Reload AP from database
+                from credential_manager_v2 import CredentialManager
+                creds_manager = CredentialManager()
+                updated_ap = creds_manager.find_by_ap_id(ap_id)
+                
+                if updated_ap:
+                    # Update active AP data
+                    self.active_ap = updated_ap
+                    
+                    # Update context panel with fresh AP data only (no Jira refresh)
+                    if hasattr(self, 'context_panel'):
+                        # Update the AP data but don't trigger Jira reload
+                        self.context_panel.active_ap_data = updated_ap
+                        # Only refresh notes (fast operation)
+                        self.context_panel._load_notes()
+                    
+                    # Update content panel if showing overview
+                    if hasattr(self, 'content_panel'):
+                        # Only update if we're on overview (not browser/ssh/notes)
+                        # This prevents interrupting active sessions
+                        pass  # Content panel will refresh on next view change
+            
+        except Exception as e:
+            # Silently log error without disrupting UI
+            if hasattr(self, 'activity_log'):
+                self.activity_log.log_message("System", f"Auto-refresh error: {str(e)}", "warning")
+        
+        # Schedule next refresh in 60 seconds
+        self.root.after(60000, self._auto_refresh_credentials)
 
 
 def main():

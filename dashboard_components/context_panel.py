@@ -353,8 +353,8 @@ class ContextPanel:
                 self._log("Jira not configured", "warning")
                 return
             
-            # Build basic JQL query - search for AP ID in text
-            jql = f'text ~ "{self.active_ap}"'
+            # Build basic JQL query - search for AP ID in all text fields
+            jql = f'textfields ~ "{self.active_ap}"'
             
             # Get date filters
             date_from = self.jira_date_from.get().strip()
@@ -366,10 +366,21 @@ class ContextPanel:
             if date_to:
                 jql += f' AND created <= "{date_to} 23:59"'
             
+            self._log(f"Jira JQL query: {jql}")
             success, result, message = jira_api.search_issues(jql, max_results=200)
+            self._log(f"Jira search result - success: {success}, message: {message}")
+            
+            # Also try without date filter to see if we get any results
+            simple_jql = f'textfields ~ "{self.active_ap}"'
+            success2, result2, message2 = jira_api.search_issues(simple_jql, max_results=200)
+            self._log(f"Jira search WITHOUT date filter - success: {success2}, message: {message2}")
+            if success2 and isinstance(result2, dict):
+                issues2 = result2.get('issues', [])
+                self._log(f"Found {len(issues2)} issues without date filter")
             
             if success and isinstance(result, dict):
                 issues = result.get('issues', [])
+                self._log(f"Found {len(issues)} Jira issues (with date filter)")
                 
                 # Update project checkboxes based on ALL found projects
                 self._update_project_filters(issues)
