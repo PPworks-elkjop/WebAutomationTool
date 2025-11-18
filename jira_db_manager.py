@@ -281,18 +281,24 @@ class JiraDBManager:
     def get_issues_for_ap(self, ap_id: str) -> List[Dict]:
         """
         Get all Jira issues for an AP.
+        Returns unique issues (deduplicated by jira_key).
         
         Args:
             ap_id: AP ID to search for
             
         Returns:
-            List of issue dictionaries
+            List of unique issue dictionaries
         """
         with self.db._get_connection() as conn:
             cursor = conn.cursor()
+            # Get unique issues by jira_key, preferring the most recent entry
             cursor.execute('''
                 SELECT * FROM jira_ap_links 
-                WHERE ap_id = ? 
+                WHERE id IN (
+                    SELECT MAX(id) FROM jira_ap_links 
+                    WHERE ap_id = ?
+                    GROUP BY jira_key
+                )
                 ORDER BY updated_date DESC
             ''', (ap_id,))
             
@@ -333,6 +339,7 @@ class JiraDBManager:
                      limit: int = 100) -> List[Dict]:
         """
         Search Jira issues with optional filters.
+        Returns unique issues (deduplicated by jira_key).
         
         Args:
             search_term: Search in AP ID, summary, or Jira key
@@ -340,12 +347,18 @@ class JiraDBManager:
             limit: Maximum number of results
             
         Returns:
-            List of issue dictionaries
+            List of unique issue dictionaries
         """
         with self.db._get_connection() as conn:
             cursor = conn.cursor()
             
-            query = 'SELECT * FROM jira_ap_links WHERE 1=1'
+            # Use DISTINCT on jira_key and get the most recent entry for each
+            query = '''
+                SELECT * FROM jira_ap_links 
+                WHERE id IN (
+                    SELECT MAX(id) FROM jira_ap_links 
+                    WHERE 1=1
+            '''
             params = []
             
             if search_term:
@@ -357,7 +370,7 @@ class JiraDBManager:
                 query += ' AND status = ?'
                 params.append(status)
             
-            query += ' ORDER BY updated_date DESC LIMIT ?'
+            query += ' GROUP BY jira_key) ORDER BY updated_date DESC LIMIT ?'
             params.append(limit)
             
             cursor.execute(query, params)

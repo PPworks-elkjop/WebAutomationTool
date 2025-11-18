@@ -79,9 +79,20 @@ class ContentPanel:
                 font=('Segoe UI', 14, 'bold'), bg="#FFFFFF", fg="#6C757D").pack(expand=True)
     
     def _clear_frame(self, frame):
-        """Clear content from a specific frame."""
+        """Clear content from a specific frame, but preserve SSH terminal sessions."""
         for widget in frame.winfo_children():
-            widget.destroy()
+            # Check if this widget is a preserved SSH terminal
+            is_ssh_terminal = False
+            if hasattr(self, 'current_ssh_sessions'):
+                for ap_id, session in self.current_ssh_sessions.items():
+                    if 'content_frame' in session and session['content_frame'] == widget:
+                        # This is an active SSH terminal, just hide it instead of destroying
+                        widget.pack_forget()
+                        is_ssh_terminal = True
+                        break
+            
+            if not is_ssh_terminal:
+                widget.destroy()
     
     def show_ap_overview(self, ap_data):
         """Show all AP fields in a scrollable list in AP Support Details tab."""
@@ -129,72 +140,502 @@ class ContentPanel:
         content = tk.Frame(scrollable_frame, bg="#FFFFFF", padx=30, pady=20)
         content.pack(fill=tk.BOTH, expand=True)
         
-        tk.Label(content, text=f"All Fields - AP {ap_data['ap_id']}", font=('Segoe UI', 14, 'bold'),
-                bg="#FFFFFF", fg="#212529").pack(anchor="w", pady=(0, 20))
+        # Header with show passwords button
+        header_frame = tk.Frame(content, bg="#FFFFFF")
+        header_frame.pack(fill=tk.X, pady=(0, 20))
         
-        # All fields from database
+        tk.Label(header_frame, text=f"All Fields - AP {ap_data['ap_id']}", font=('Segoe UI', 14, 'bold'),
+                bg="#FFFFFF", fg="#212529").pack(side=tk.LEFT)
+        
+        # Show/Hide passwords toggle
+        self.show_passwords = tk.BooleanVar(value=False)
+        self.password_widgets = []  # Store password labels for updating
+        
+        def toggle_passwords():
+            show = self.show_passwords.get()
+            toggle_btn.config(text="🔒 Hide Passwords" if show else "👁 Show Passwords",
+                            bg="#DC3545" if show else "#28A745")
+            # Update all password fields (Entry widgets)
+            for pwd_entry, pwd_value in self.password_widgets:
+                pwd_entry.config(state='normal')
+                pwd_entry.delete(0, tk.END)
+                if show:
+                    display_value = pwd_value if pwd_value and pwd_value != 'N/A' else 'N/A'
+                else:
+                    display_value = '********' if pwd_value and pwd_value != 'N/A' else 'N/A'
+                pwd_entry.insert(0, display_value)
+                pwd_entry.config(state='readonly')
+        
+        toggle_btn = tk.Button(header_frame, text="👁 Show Passwords", 
+                              command=lambda: [self.show_passwords.set(not self.show_passwords.get()), toggle_passwords()],
+                              bg="#28A745", fg="white", font=('Segoe UI', 9, 'bold'),
+                              padx=15, pady=5, relief=tk.FLAT, cursor="hand2")
+        toggle_btn.pack(side=tk.RIGHT)
+        
+        # All fields from database (including password fields)
         all_fields = [
-            ('AP ID', 'ap_id'),
-            ('Store ID', 'store_id'),
-            ('Store Alias', 'store_alias'),
-            ('Retail Chain', 'retail_chain'),
-            ('IP Address', 'ip_address'),
-            ('Type', 'type'),
-            ('MAC Address', 'mac_address'),
-            ('Serial Number', 'serial_number'),
-            ('Software Version', 'software_version'),
-            ('Firmware Version', 'firmware_version'),
-            ('Hardware Revision', 'hardware_revision'),
-            ('Build', 'build'),
-            ('Configuration Mode', 'configuration_mode'),
-            ('Service Status', 'service_status'),
-            ('Uptime', 'uptime'),
-            ('Communication Daemon Status', 'communication_daemon_status'),
-            ('Connectivity Internet', 'connectivity_internet'),
-            ('Connectivity Provisioning', 'connectivity_provisioning'),
-            ('Connectivity NTP Server', 'connectivity_ntp_server'),
-            ('Connectivity APC Address', 'connectivity_apc_address'),
-            ('Status', 'status'),
-            ('Last Seen', 'last_seen'),
-            ('Last Ping Time', 'last_ping_time'),
-            ('Username WebUI', 'username_webui'),
-            ('Username SSH', 'username_ssh'),
-            ('Notes', 'notes'),
-            ('Created At', 'created_at'),
-            ('Updated At', 'updated_at'),
+            ('AP ID', 'ap_id', False),
+            ('Store ID', 'store_id', False),
+            ('Store Alias', 'store_alias', False),
+            ('Retail Chain', 'retail_chain', False),
+            ('IP Address', 'ip_address', False),
+            ('Type', 'type', False),
+            ('MAC Address', 'mac_address', False),
+            ('Serial Number', 'serial_number', False),
+            ('Software Version', 'software_version', False),
+            ('Firmware Version', 'firmware_version', False),
+            ('Hardware Revision', 'hardware_revision', False),
+            ('Build', 'build', False),
+            ('Configuration Mode', 'configuration_mode', False),
+            ('Service Status', 'service_status', False),
+            ('Uptime', 'uptime', False),
+            ('Communication Daemon Status', 'communication_daemon_status', False),
+            ('Connectivity Internet', 'connectivity_internet', False),
+            ('Connectivity Provisioning', 'connectivity_provisioning', False),
+            ('Connectivity NTP Server', 'connectivity_ntp_server', False),
+            ('Connectivity APC Address', 'connectivity_apc_address', False),
+            ('Status', 'status', False),
+            ('Last Seen', 'last_seen', False),
+            ('Last Ping Time', 'last_ping_time', False),
+            ('Username WebUI', 'username_webui', False),
+            ('Password WebUI', 'password_webui', True),  # Password field
+            ('Username SSH', 'username_ssh', False),
+            ('Password SSH', 'password_ssh', True),  # Password field
+            ('Notes', 'notes', False),
+            ('Created At', 'created_at', False),
+            ('Updated At', 'updated_at', False),
         ]
         
-        for label, field in all_fields:
+        for label, field, is_password in all_fields:
             value = ap_data.get(field, 'N/A')
-            self._create_info_row(content, label, value)
+            if is_password:
+                # Create password row with hidden value initially
+                value_label = self._create_info_row(content, label, '********' if value and value != 'N/A' else 'N/A')
+                self.password_widgets.append((value_label, value))
+            else:
+                self._create_info_row(content, label, value)
         
         self._log(f"Showing all fields for AP {ap_data['ap_id']} - COMPLETE")
     
-    def show_ssh_terminal(self, ap_id):
-        """Show SSH terminal for AP."""
+    def _connect_ssh(self, session):
+        """Connect to AP via SSH in background thread."""
+        import threading
+        
+        def connect():
+            try:
+                import paramiko
+                import time
+                
+                ap_data = session['ap_data']
+                terminal_text = session['terminal_text']
+                
+                ap_id = ap_data.get('ap_id')
+                ip_address = ap_data.get('ip_address', '').strip()
+                username = ap_data.get('username_ssh', '').strip()
+                password = ap_data.get('password_ssh', '').strip()
+                
+                # Clean up IP address
+                if ip_address.startswith('http'):
+                    ip_address = ip_address.split('://')[1]
+                if '@' in ip_address:
+                    ip_address = ip_address.split('@')[1]
+                
+                # Validate credentials
+                if not ip_address:
+                    self.parent.after(0, lambda: terminal_text.insert(tk.END, "\n✗ Error: No IP address configured\n"))
+                    self.parent.after(0, lambda: terminal_text.see(tk.END))
+                    return
+                
+                if not username:
+                    self.parent.after(0, lambda: terminal_text.insert(tk.END, "\n✗ Error: No SSH username configured\n"))
+                    self.parent.after(0, lambda: terminal_text.see(tk.END))
+                    return
+                
+                if not password:
+                    self.parent.after(0, lambda: terminal_text.insert(tk.END, "\n✗ Error: No SSH password configured\n"))
+                    self.parent.after(0, lambda: terminal_text.see(tk.END))
+                    return
+                
+                def log_output(msg):
+                    self.parent.after(0, lambda m=msg: terminal_text.insert(tk.END, m))
+                    self.parent.after(0, lambda: terminal_text.see(tk.END))
+                
+                log_output(f"Connecting to {username}@{ip_address}...\n")
+                
+                # Create SSH client
+                ssh_client = paramiko.SSHClient()
+                ssh_client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+                
+                # Connect with timeout
+                ssh_client.connect(
+                    hostname=ip_address,
+                    username=username,
+                    password=password,
+                    timeout=10,
+                    look_for_keys=False,
+                    allow_agent=False
+                )
+                
+                log_output(f"✓ Connected to AP {ap_id}\n\n")
+                
+                # Start interactive shell
+                shell_channel = ssh_client.invoke_shell(width=120, height=40)
+                shell_channel.settimeout(0.1)
+                
+                session['ssh_client'] = ssh_client
+                session['shell_channel'] = shell_channel
+                session['connected'] = True
+                
+                # Start output reading thread
+                def read_output():
+                    """Read SSH output continuously."""
+                    while session['connected']:
+                        try:
+                            if shell_channel.recv_ready():
+                                output = shell_channel.recv(4096).decode('utf-8', errors='replace')
+                                self.parent.after(0, lambda o=output: terminal_text.insert(tk.END, o))
+                                self.parent.after(0, lambda: terminal_text.see(tk.END))
+                            else:
+                                time.sleep(0.05)
+                        except Exception as e:
+                            if session['connected']:
+                                error_msg = f"\n✗ Output read error: {str(e)}\n"
+                                self.parent.after(0, lambda m=error_msg: terminal_text.insert(tk.END, m))
+                                self.parent.after(0, lambda: terminal_text.see(tk.END))
+                            break
+                
+                output_thread = threading.Thread(target=read_output, daemon=True)
+                output_thread.start()
+                session['output_thread'] = output_thread
+                
+                # Enable command input
+                self.parent.after(0, lambda: session['command_entry'].config(state='normal'))
+                
+            except paramiko.AuthenticationException:
+                self.parent.after(0, lambda: terminal_text.insert(tk.END, "\n✗ Authentication failed - check username/password\n"))
+                self.parent.after(0, lambda: terminal_text.see(tk.END))
+            except paramiko.SSHException as e:
+                self.parent.after(0, lambda: terminal_text.insert(tk.END, f"\n✗ SSH error: {str(e)}\n"))
+                self.parent.after(0, lambda: terminal_text.see(tk.END))
+            except Exception as e:
+                self.parent.after(0, lambda: terminal_text.insert(tk.END, f"\n✗ Connection error: {str(e)}\n"))
+                self.parent.after(0, lambda: terminal_text.see(tk.END))
+        
+        thread = threading.Thread(target=connect, daemon=True)
+        thread.start()
+    
+    def _disconnect_ssh(self, session):
+        """Disconnect SSH session."""
+        try:
+            session['connected'] = False
+            
+            if session['shell_channel']:
+                session['shell_channel'].close()
+            
+            if session['ssh_client']:
+                session['ssh_client'].close()
+            
+            terminal_text = session['terminal_text']
+            terminal_text.insert(tk.END, "\n\n✓ Disconnected from SSH\n")
+            terminal_text.see(tk.END)
+            
+            session['command_entry'].config(state='disabled')
+            
+            # Remove from active sessions
+            if hasattr(self, 'current_ssh_sessions'):
+                ap_id = session['ap_data'].get('ap_id')
+                if ap_id in self.current_ssh_sessions:
+                    del self.current_ssh_sessions[ap_id]
+            
+        except Exception as e:
+            self._log(f"Error disconnecting SSH: {str(e)}")
+    
+    def restore_ssh_terminal(self, ap_id):
+        """Restore an existing SSH terminal session to the display."""
+        if not hasattr(self, 'current_ssh_sessions') or ap_id not in self.current_ssh_sessions:
+            return
+        
+        session = self.current_ssh_sessions[ap_id]
+        if not session.get('connected') or 'content_frame' not in session:
+            return
+        
+        # Clear current content
         self._clear_frame(self.ap_details_frame)
         self.current_content_type = "ssh"
-        self.current_data = ap_id
+        self.current_data = session['ap_data']
         
         self.header_label.config(text=f"SSH Terminal - AP {ap_id}")
-        self.popout_button.pack(side=tk.RIGHT, padx=10)
+        self.popout_button.pack_forget()
+        
+        # Restore the saved frame
+        content_frame = session['content_frame']
+        content_frame.pack(fill=tk.BOTH, expand=True)
+        
+        # Set focus to command entry
+        if 'command_entry' in session:
+            session['command_entry'].focus_set()
+        
+        self._log(f"Restored SSH terminal for AP {ap_id}")
+    
+    def ssh_execute_command(self, ap_data, command, action_name="command"):
+        """Execute a command on the SSH terminal if it's active for this AP."""
+        if not hasattr(self, 'current_ssh_sessions'):
+            self.current_ssh_sessions = {}
+        
+        ap_id = ap_data.get('ap_id')
+        if ap_id not in self.current_ssh_sessions:
+            messagebox.showinfo("Not Connected", 
+                              f"Please open SSH terminal for AP {ap_id} first",
+                              parent=self.parent)
+            return
+        
+        session = self.current_ssh_sessions[ap_id]
+        
+        if not session['connected'] or not session['shell_channel']:
+            messagebox.showwarning("Not Connected", 
+                                 f"SSH connection for AP {ap_id} is not active",
+                                 parent=self.parent)
+            return
+        
+        try:
+            terminal_text = session['terminal_text']
+            
+            # Add visual separator and command label
+            if action_name != "command":
+                terminal_text.insert(tk.END, f"\n{'='*60}\n")
+                terminal_text.insert(tk.END, f"# Action: {action_name}\n")
+                terminal_text.insert(tk.END, f"{'='*60}\n")
+            
+            terminal_text.insert(tk.END, f"$ {command}\n")
+            terminal_text.see(tk.END)
+            
+            session['shell_channel'].send(command + '\n')
+            self._log(f"Executed SSH command '{action_name}' on AP {ap_id}")
+        except Exception as e:
+            messagebox.showerror("Command Error", 
+                               f"Failed to execute command: {str(e)}",
+                               parent=self.parent)
+    
+    def ssh_download_logs(self, ap_data, dest_folder):
+        """Download log files from AP via SCP."""
+        import threading
+        
+        if not hasattr(self, 'current_ssh_sessions'):
+            self.current_ssh_sessions = {}
+        
+        ap_id = ap_data.get('ap_id')
+        if ap_id not in self.current_ssh_sessions:
+            messagebox.showinfo("Not Connected", 
+                              f"Please open SSH terminal for AP {ap_id} first",
+                              parent=self.parent)
+            return
+        
+        session = self.current_ssh_sessions[ap_id]
+        
+        if not session['connected'] or not session['ssh_client']:
+            messagebox.showwarning("Not Connected", 
+                                 f"SSH connection for AP {ap_id} is not active",
+                                 parent=self.parent)
+            return
+        
+        def download():
+            try:
+                import paramiko
+                import os
+                
+                terminal_text = session['terminal_text']
+                
+                def log_output(msg):
+                    self.parent.after(0, lambda m=msg: terminal_text.insert(tk.END, m))
+                    self.parent.after(0, lambda: terminal_text.see(tk.END))
+                
+                log_output("\n=== Downloading Log Files ===\n")
+                
+                # Create SCP client using existing SSH connection
+                scp_client = paramiko.SFTPClient.from_transport(session['ssh_client'].get_transport())
+                
+                # Get list of files matching pattern
+                remote_path = "/opt/esl/accesspoint"
+                try:
+                    files = scp_client.listdir(remote_path)
+                    log_files = [f for f in files if '20' in f and 'log' in f.lower()]
+                    
+                    if not log_files:
+                        log_output("No log files found to download\n")
+                        return
+                    
+                    log_output(f"Found {len(log_files)} log file(s)\n\n")
+                    
+                    # Download each file
+                    for filename in log_files:
+                        remote_file = f"{remote_path}/{filename}"
+                        local_file = os.path.join(dest_folder, filename)
+                        
+                        log_output(f"Downloading: {filename}...")
+                        scp_client.get(remote_file, local_file)
+                        log_output(" ✓\n")
+                    
+                    log_output(f"\n✓ All log files downloaded to {dest_folder}\n")
+                    
+                    def show_success():
+                        messagebox.showinfo("Download Complete", 
+                                          f"Downloaded {len(log_files)} log file(s) to {dest_folder}",
+                                          parent=self.parent)
+                    self.parent.after(0, show_success)
+                    
+                except Exception as e:
+                    log_output(f"\n✗ Error: {str(e)}\n")
+                finally:
+                    scp_client.close()
+                    
+            except Exception as e:
+                def show_error():
+                    messagebox.showerror("Download Failed", 
+                                       f"Failed to download logs: {str(e)}",
+                                       parent=self.parent)
+                self.parent.after(0, show_error)
+        
+        thread = threading.Thread(target=download, daemon=True)
+        thread.start()
+    
+    def show_ssh_terminal(self, ap_data):
+        """Show SSH terminal for AP with live connection."""
+        ap_id = ap_data.get('ap_id')
+        
+        # Initialize session storage if needed
+        if not hasattr(self, 'current_ssh_sessions'):
+            self.current_ssh_sessions = {}
+        
+        # Check if session already exists and is connected
+        if ap_id in self.current_ssh_sessions:
+            existing_session = self.current_ssh_sessions[ap_id]
+            if existing_session.get('connected'):
+                # Session already exists and is connected, just show a message
+                self._log(f"SSH terminal for AP {ap_id} is already open and connected")
+                messagebox.showinfo("Already Connected", 
+                                  f"SSH terminal for AP {ap_id} is already active in the lower right panel",
+                                  parent=self.parent)
+                return
+        
+        self._clear_frame(self.ap_details_frame)
+        self.current_content_type = "ssh"
+        self.current_data = ap_data
+        
+        self.header_label.config(text=f"SSH Terminal - AP {ap_id}")
+        self.popout_button.pack_forget()
         
         content = tk.Frame(self.ap_details_frame, bg="#000000", padx=10, pady=10)
         content.pack(fill=tk.BOTH, expand=True)
         
-        # SSH terminal placeholder
-        terminal_text = scrolledtext.ScrolledText(content, font=('Consolas', 10),
+        # Create terminal output area
+        terminal_frame = tk.Frame(content, bg="#000000")
+        terminal_frame.pack(fill=tk.BOTH, expand=True)
+        
+        terminal_text = scrolledtext.ScrolledText(terminal_frame, font=('Consolas', 10),
                                                   bg="#000000", fg="#00FF00",
-                                                  insertbackground="white")
+                                                  insertbackground="#00FF00",
+                                                  wrap=tk.WORD)
         terminal_text.pack(fill=tk.BOTH, expand=True)
         
+        # Create command input area
+        input_frame = tk.Frame(content, bg="#1a1a1a", padx=5, pady=5)
+        input_frame.pack(fill=tk.X, pady=(5, 0))
+        
+        # Add label for clarity
+        tk.Label(input_frame, text="Command:", bg="#1a1a1a", fg="#00FF00",
+                font=('Consolas', 9)).pack(side=tk.LEFT, padx=(0, 5))
+        
+        # Create Entry without textvariable first, we'll get value directly
+        command_entry = tk.Entry(input_frame,
+                                font=('Consolas', 11), bg="#0a0a0a", fg="#00FF00",
+                                insertbackground="#00FF00", relief=tk.SOLID, bd=1,
+                                highlightthickness=2, highlightcolor="#00FF00",
+                                highlightbackground="#333333")
+        command_entry.pack(fill=tk.X, side=tk.LEFT, expand=True, padx=(0, 5), ipady=3)
+        
+        # Store session info
+        session = {
+            'ap_data': ap_data,
+            'terminal_text': terminal_text,
+            'command_entry': command_entry,
+            'ssh_client': None,
+            'shell_channel': None,
+            'connected': False,
+            'output_thread': None,
+            'content_frame': content  # Store frame reference to prevent destruction
+        }
+        
+        # Store session by AP ID for quick command access
+        self.current_ssh_sessions[ap_id] = session
+        
+        def send_command(event=None):
+            """Send command to SSH session."""
+            # Get command directly from Entry widget
+            cmd = command_entry.get().strip()
+            
+            # Log that send was called
+            self._log(f"SSH send_command called - cmd: '{cmd}', connected: {session.get('connected')}")
+            
+            if not session.get('connected') or not session.get('shell_channel'):
+                if cmd:  # Only show message if user actually tried to send something
+                    terminal_text.insert(tk.END, f"\n⚠ Not connected to SSH - please wait for connection\n")
+                    terminal_text.insert(tk.END, f"   You typed: {cmd}\n")
+                    terminal_text.see(tk.END)
+                    command_entry.delete(0, tk.END)
+                else:
+                    terminal_text.insert(tk.END, "\n⚠ Not connected to SSH yet\n")
+                    terminal_text.see(tk.END)
+                return 'break'
+            
+            if cmd:
+                try:
+                    # Echo command in terminal
+                    terminal_text.insert(tk.END, f"$ {cmd}\n")
+                    terminal_text.see(tk.END)
+                    
+                    # Send to SSH
+                    session['shell_channel'].send(cmd + '\n')
+                    command_entry.delete(0, tk.END)
+                    self._log(f"SSH command sent successfully: {cmd}")
+                except Exception as e:
+                    error_msg = f"\n✗ Error sending command: {str(e)}\n"
+                    terminal_text.insert(tk.END, error_msg)
+                    terminal_text.see(tk.END)
+                    self._log(f"SSH command error: {str(e)}")
+            else:
+                terminal_text.insert(tk.END, "⚠ Please enter a command\n")
+                terminal_text.see(tk.END)
+            
+            return 'break'
+        
+        command_entry.bind('<Return>', send_command)
+        
+        # Give focus to command entry so user can start typing immediately
+        def set_focus():
+            command_entry.focus_force()
+            # Log to verify entry is enabled
+            self._log(f"SSH command entry ready - state: {command_entry['state']}")
+        
+        # Set focus after a brief delay to ensure widget is fully rendered
+        self.parent.after(100, set_focus)
+        
+        send_btn = tk.Button(input_frame, text="Send", command=send_command,
+                           bg="#28A745", fg="white", font=('Segoe UI', 9, 'bold'),
+                           padx=15, relief=tk.FLAT, cursor="hand2")
+        send_btn.pack(side=tk.RIGHT)
+        
+        disconnect_btn = tk.Button(input_frame, text="Disconnect",
+                                  command=lambda: self._disconnect_ssh(session),
+                                  bg="#DC3545", fg="white", font=('Segoe UI', 9, 'bold'),
+                                  padx=15, relief=tk.FLAT, cursor="hand2")
+        disconnect_btn.pack(side=tk.RIGHT, padx=(0, 5))
+        
+        # Start SSH connection in background
         terminal_text.insert('1.0', f"SSH Terminal - AP {ap_id}\n")
         terminal_text.insert(tk.END, "Connecting...\n\n")
-        terminal_text.insert(tk.END, "TODO: Embed SSH terminal widget here\n")
-        terminal_text.insert(tk.END, "Or show SSH output/commands\n\n")
-        terminal_text.insert(tk.END, f"root@ap-{ap_id}:~# ")
         
         self._log(f"Opening SSH terminal for AP {ap_id}")
+        self._connect_ssh(session)
     
     def show_provisioning_actions(self, ap_data, ap_panel):
         """Show provisioning actions in content panel."""
@@ -898,6 +1339,8 @@ class ContentPanel:
         value_entry.insert(0, str(value))
         value_entry.config(state='readonly')
         value_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(15, 0))
+        
+        return value_entry
     
     def _create_note_item(self, parent, note, ap_id):
         """Create a note item in 2-row format (date/user/replies, then headline)."""

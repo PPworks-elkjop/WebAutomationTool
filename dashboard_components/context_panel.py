@@ -95,27 +95,51 @@ class ContextPanel:
                  padx=15, pady=6, relief=tk.FLAT, cursor="hand2",
                  borderwidth=0).pack(side=tk.RIGHT)
         
-        # Date range filter
-        date_row = tk.Frame(filters_frame, bg="#F8F9FA")
-        date_row.pack(fill=tk.X, pady=(0, 8))
+        # Combined row: Ticket ID and Date Range
+        search_row = tk.Frame(filters_frame, bg="#F8F9FA")
+        search_row.pack(fill=tk.X, pady=(0, 8))
         
-        tk.Label(date_row, text="Date Range:", font=('Segoe UI', 9, 'bold'),
-                bg="#F8F9FA", fg="#495057", width=12, anchor="w").pack(side=tk.LEFT)
-        
-        tk.Label(date_row, text="From:", font=('Segoe UI', 9),
+        # Ticket ID section
+        tk.Label(search_row, text="Ticket ID:", font=('Segoe UI', 9, 'bold'),
                 bg="#F8F9FA", fg="#495057").pack(side=tk.LEFT, padx=(0, 5))
         
-        from datetime import datetime, timedelta
-        default_from = (datetime.now() - timedelta(days=180)).strftime('%Y-%m-%d')
-        default_to = datetime.now().strftime('%Y-%m-%d')
+        ticket_entry_container = tk.Frame(search_row, bg="#FFFFFF", relief=tk.SOLID, borderwidth=1)
+        ticket_entry_container.pack(side=tk.LEFT, padx=(0, 15))
+        
+        self.jira_ticket_id = tk.Entry(ticket_entry_container, font=('Segoe UI', 9), width=15,
+                                       bg="#FFFFFF", fg="#212529", relief=tk.FLAT, bd=0)
+        self.jira_ticket_id.pack(side=tk.LEFT, padx=5, pady=3)
+        self.jira_ticket_id.insert(0, "e.g., FIXIT-1192609")
+        self.jira_ticket_id.config(fg="#6C757D")
+        
+        # Add placeholder behavior
+        def on_ticket_focus_in(event):
+            if self.jira_ticket_id.get() == "e.g., FIXIT-1192609":
+                self.jira_ticket_id.delete(0, tk.END)
+                self.jira_ticket_id.config(fg="#212529")
+        
+        def on_ticket_focus_out(event):
+            if not self.jira_ticket_id.get():
+                self.jira_ticket_id.insert(0, "e.g., FIXIT-1192609")
+                self.jira_ticket_id.config(fg="#6C757D")
+        
+        self.jira_ticket_id.bind("<FocusIn>", on_ticket_focus_in)
+        self.jira_ticket_id.bind("<FocusOut>", on_ticket_focus_out)
+        self.jira_ticket_id.bind("<Return>", lambda e: self._apply_jira_filters())
+        
+        # Date range section (on same row)
+        tk.Label(search_row, text="Date Range:", font=('Segoe UI', 9, 'bold'),
+                bg="#F8F9FA", fg="#495057").pack(side=tk.LEFT, padx=(0, 5))
+        
+        tk.Label(search_row, text="From:", font=('Segoe UI', 9),
+                bg="#F8F9FA", fg="#495057").pack(side=tk.LEFT, padx=(0, 5))
         
         # Custom styled date from entry with calendar button
-        date_from_container = tk.Frame(date_row, bg="#FFFFFF", relief=tk.SOLID, borderwidth=1)
+        date_from_container = tk.Frame(search_row, bg="#FFFFFF", relief=tk.SOLID, borderwidth=1)
         date_from_container.pack(side=tk.LEFT, padx=(0, 5))
         
         self.jira_date_from = tk.Entry(date_from_container, font=('Segoe UI', 9), width=10,
                                        bg="#FFFFFF", fg="#212529", relief=tk.FLAT, bd=0)
-        self.jira_date_from.insert(0, default_from)
         self.jira_date_from.pack(side=tk.LEFT, padx=5, pady=3)
         
         cal_from_btn = tk.Label(date_from_container, text="📅", font=('Segoe UI', 10),
@@ -123,16 +147,15 @@ class ContextPanel:
         cal_from_btn.pack(side=tk.LEFT, padx=(0, 5))
         cal_from_btn.bind("<Button-1>", lambda e: self._show_date_picker(self.jira_date_from))
         
-        tk.Label(date_row, text="To:", font=('Segoe UI', 9),
-                bg="#F8F9FA", fg="#495057").pack(side=tk.LEFT, padx=(10, 5))
+        tk.Label(search_row, text="To:", font=('Segoe UI', 9),
+                bg="#F8F9FA", fg="#495057").pack(side=tk.LEFT, padx=(5, 5))
         
         # Custom styled date to entry with calendar button
-        date_to_container = tk.Frame(date_row, bg="#FFFFFF", relief=tk.SOLID, borderwidth=1)
+        date_to_container = tk.Frame(search_row, bg="#FFFFFF", relief=tk.SOLID, borderwidth=1)
         date_to_container.pack(side=tk.LEFT)
         
         self.jira_date_to = tk.Entry(date_to_container, font=('Segoe UI', 9), width=10,
                                      bg="#FFFFFF", fg="#212529", relief=tk.FLAT, bd=0)
-        self.jira_date_to.insert(0, default_to)
         self.jira_date_to.pack(side=tk.LEFT, padx=5, pady=3)
         
         cal_to_btn = tk.Label(date_to_container, text="📅", font=('Segoe UI', 10),
@@ -159,14 +182,15 @@ class ContextPanel:
                 bg="#F8F9FA", fg="#495057", width=12, anchor="w").pack(side=tk.LEFT)
         
         self.jira_statuses = {}
-        status_checkboxes_frame = tk.Frame(status_row, bg="#F8F9FA")
-        status_checkboxes_frame.pack(side=tk.LEFT, fill=tk.X, expand=True)
+        self.status_checkboxes_frame = tk.Frame(status_row, bg="#F8F9FA")
+        self.status_checkboxes_frame.pack(side=tk.LEFT, fill=tk.X, expand=True)
         
-        # Common statuses with custom checkboxes
-        for status in ['Open', 'In Progress', 'Resolved', 'Closed']:
+        # Common statuses with custom checkboxes - start with common ones
+        # Note: This will be updated dynamically based on found tickets
+        for status in ['Open', 'In Progress', 'Waiting for Support', 'Resolved', 'Closed']:
             var = tk.BooleanVar(value=True)
             self.jira_statuses[status] = var
-            self._create_custom_checkbox(status_checkboxes_frame, status, var)
+            self._create_custom_checkbox(self.status_checkboxes_frame, status, var)
         
         # Scrollable list for tickets with custom layout
         list_container = tk.Frame(self.jira_content_frame, bg="#FFFFFF")
@@ -353,25 +377,56 @@ class ContextPanel:
                 self._log("Jira not configured", "warning")
                 return
             
-            # Build basic JQL query - search for AP ID in all text fields
-            jql = f'textfields ~ "{self.active_ap}"'
-            
-            # Get date filters
-            date_from = self.jira_date_from.get().strip()
-            date_to = self.jira_date_to.get().strip()
-            
-            # Add date range to JQL
-            if date_from:
-                jql += f' AND created >= "{date_from}"'
-            if date_to:
-                jql += f' AND created <= "{date_to} 23:59"'
+            # Build JQL query - check if user specified a ticket ID first
+            ticket_id = self.jira_ticket_id.get().strip()
+            if ticket_id and ticket_id != "e.g., FIXIT-1192609" and '-' in ticket_id:
+                # User specified a ticket ID - search for that specifically
+                # Don't apply date filters when searching by ticket ID
+                jql = f'key = "{ticket_id.upper()}"'
+                self._log(f"Searching for specific ticket: {ticket_id.upper()}")
+            else:
+                # Regular AP ID search - use multiple fields for better coverage
+                # Add wildcard to numeric AP IDs (like Jira does) to find variations
+                search_term = f"{self.active_ap}*" if self.active_ap.isdigit() else self.active_ap
+                jql = f'(text ~ "{search_term}" OR summary ~ "{search_term}" OR description ~ "{search_term}" OR comment ~ "{search_term}")'
+                
+                # Get date filters (only for AP ID searches)
+                date_from = self.jira_date_from.get().strip()
+                date_to = self.jira_date_to.get().strip()
+                
+                # Add date range to JQL
+                if date_from:
+                    jql += f' AND created >= "{date_from}"'
+                if date_to:
+                    jql += f' AND created <= "{date_to} 23:59"'
             
             self._log(f"Jira JQL query: {jql}")
             success, result, message = jira_api.search_issues(jql, max_results=200)
             self._log(f"Jira search result - success: {success}, message: {message}")
             
+            # If searching by ticket ID and not found, provide detailed feedback
+            if ticket_id and ticket_id != "e.g., FIXIT-1192609" and '-' in ticket_id:
+                if not success or not result.get('issues'):
+                    self._log(f"Ticket {ticket_id.upper()} not found via JQL search")
+                    # Try direct API call
+                    try:
+                        success_direct, issue_data, msg = jira_api.get_issue(ticket_id.upper())
+                        if success_direct and issue_data:
+                            self._log(f"Ticket {ticket_id.upper()} found via direct API but not via search")
+                            # Wrap in expected format
+                            result = {'issues': [issue_data], 'total': 1}
+                            success = True
+                        else:
+                            self._log(f"Ticket {ticket_id.upper()} not found via direct API either: {msg}")
+                    except Exception as e:
+                        self._log(f"Error trying direct API: {str(e)}")
+            
             # Also try without date filter to see if we get any results
-            simple_jql = f'textfields ~ "{self.active_ap}"'
+            if ticket_id and ticket_id != "e.g., FIXIT-1192609" and '-' in ticket_id:
+                simple_jql = f'key = "{ticket_id.upper()}"'
+            else:
+                search_term = f"{self.active_ap}*" if self.active_ap.isdigit() else self.active_ap
+                simple_jql = f'(text ~ "{search_term}" OR summary ~ "{search_term}" OR description ~ "{search_term}" OR comment ~ "{search_term}")'
             success2, result2, message2 = jira_api.search_issues(simple_jql, max_results=200)
             self._log(f"Jira search WITHOUT date filter - success: {success2}, message: {message2}")
             if success2 and isinstance(result2, dict):
@@ -382,8 +437,9 @@ class ContextPanel:
                 issues = result.get('issues', [])
                 self._log(f"Found {len(issues)} Jira issues (with date filter)")
                 
-                # Update project checkboxes based on ALL found projects
+                # Update project and status checkboxes based on ALL found issues
                 self._update_project_filters(issues)
+                self._update_status_filters(issues)
                 
                 # Apply client-side filters
                 filtered_issues = []
@@ -414,9 +470,15 @@ class ContextPanel:
                     
                     self._log(f"Loaded {len(filtered_issues)} Jira tickets (filtered from {len(issues)} total)")
                 else:
-                    tk.Label(self.jira_tickets_frame, 
-                            text=f"No Jira tickets found matching filters for '{self.active_ap}'",
-                            font=('Segoe UI', 10), bg="#FFFFFF", fg="#6C757D").pack(pady=20)
+                    # Show appropriate message based on search type
+                    if ticket_id and ticket_id != "e.g., FIXIT-1192609":
+                        msg = f"Ticket '{ticket_id.upper()}' not found.\n\nPlease verify:\n• Ticket exists\n• You have access to it\n• Ticket ID is correct"
+                    else:
+                        msg = f"No Jira tickets found matching filters for '{self.active_ap}'"
+                    
+                    tk.Label(self.jira_tickets_frame, text=msg,
+                            font=('Segoe UI', 10), bg="#FFFFFF", fg="#6C757D",
+                            justify=tk.LEFT).pack(pady=20)
                     self._log("No Jira tickets found")
             else:
                 tk.Label(self.jira_tickets_frame, text=f"Error: {message}",
@@ -606,6 +668,28 @@ class ContextPanel:
                 var = tk.BooleanVar(value=True)
                 self.jira_projects[project_key] = var
                 self._create_custom_checkbox(self.project_checkboxes_frame, project_key, var)
+    
+    def _update_status_filters(self, issues):
+        """Update status filter checkboxes based on found issues."""
+        # Extract unique statuses from issues
+        statuses = set()
+        for issue in issues:
+            fields = issue.get('fields', {})
+            status = fields.get('status', {})
+            if isinstance(status, dict):
+                status_name = status.get('name')
+                if status_name:
+                    statuses.add(status_name)
+        
+        # Add new status checkboxes if needed (check exact key to avoid duplicates)
+        for status_name in statuses:
+            if status_name not in self.jira_statuses:
+                self._log(f"Adding new status filter: {status_name}")
+                var = tk.BooleanVar(value=True)
+                self.jira_statuses[status_name] = var
+                self._create_custom_checkbox(self.status_checkboxes_frame, status_name, var)
+            else:
+                self._log(f"Status filter already exists: {status_name}")
     
     def _create_jira_ticket_card(self, issue):
         """Create a card for a Jira ticket with status badge."""

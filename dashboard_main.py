@@ -333,27 +333,43 @@ class DashboardMain:
         # Update context panel to show data for this AP
         self.context_panel.set_active_ap(ap_id, ap_data)
         
-        # Update content panel
+        # Update content panel - always update AP Support Details
         self.content_panel.show_ap_overview(ap_data)
+        
+        # Clear Context Details tab to show placeholder (user needs to select item again)
+        self.content_panel._show_placeholder_in_frame(self.content_panel.context_details_frame)
     
     def _on_ap_tab_changed(self, ap_id, tab_name):
         """Called when user switches sub-tabs within an AP (Overview, Notes, Browser, SSH, Actions)."""
         self.activity_log.log_message("AP Panel", f"Switched to {tab_name} tab for AP {ap_id}", "info")
         
+        # Get AP data for this AP
+        ap_data = self.db.get_access_point(ap_id)
+        if not ap_data:
+            self.activity_log.log_message("Dashboard", f"Could not find AP data for {ap_id}", "error")
+            return
+        
         # Update content panel based on active tab
         if tab_name == "SSH Terminal":
-            self.content_panel.show_ssh_terminal(ap_id)
+            # Check if SSH terminal is already active for this AP
+            if hasattr(self.content_panel, 'current_ssh_sessions') and ap_id in self.content_panel.current_ssh_sessions:
+                session = self.content_panel.current_ssh_sessions[ap_id]
+                if session.get('connected') and 'content_frame' in session:
+                    # Restore existing session frame
+                    self.activity_log.log_message("SSH", f"Restoring active SSH session for AP {ap_id}", "info")
+                    self.content_panel.restore_ssh_terminal(ap_id)
+                    return
+            # No existing session, create new one
+            self.content_panel.show_ssh_terminal(ap_data)
         elif tab_name == "Browser":
-            self.content_panel.show_browser_status(ap_id, self.active_ap)
+            self.content_panel.show_browser_status(ap_id, ap_data)
         elif tab_name == "Notes":
             self.content_panel.show_notes(ap_id)
         elif tab_name == "Overview":
-            if self.active_ap:
-                self.content_panel.show_ap_overview(self.active_ap)
+            self.content_panel.show_ap_overview(ap_data)
         else:
             # Default to overview
-            if self.active_ap:
-                self.content_panel.show_ap_overview(self.active_ap)
+            self.content_panel.show_ap_overview(ap_data)
     
     def _on_context_selection(self, item_type, item_data):
         """Called when user selects something in context panel (Jira ticket, Vusion item, etc.)."""

@@ -66,7 +66,7 @@ class APPanel:
         
         # Search input
         search_input_frame = tk.Frame(content, bg="#FFFFFF")
-        search_input_frame.pack(fill=tk.X, pady=(0, 10))
+        search_input_frame.pack(fill=tk.X, pady=(0, 5))
         
         self.search_entry = tk.Entry(search_input_frame, font=('Segoe UI', 11), 
                                      bd=1, relief=tk.SOLID, highlightthickness=0)
@@ -77,6 +77,10 @@ class APPanel:
                  bg="#2B5A8A", fg="white", font=('Segoe UI', 10, 'bold'),
                  padx=20, pady=8, relief=tk.FLAT, cursor="hand2",
                  activebackground="#1F4366").pack(side=tk.LEFT)
+        
+        # Info note about Jira counts
+        tk.Label(content, text="Note: 'Include Jira' fetches live ticket counts (slower but current). Uncheck for faster searches.",
+                font=('Segoe UI', 8, 'italic'), bg="#FFFFFF", fg="#6C757D").pack(anchor="w", pady=(0, 10))
         
         # Custom styled checkboxes
         checkbox_frame = tk.Frame(content, bg="#FFFFFF")
@@ -96,6 +100,14 @@ class APPanel:
         # IP Address checkbox
         self.search_ip_address = tk.BooleanVar(value=False)
         self._create_custom_checkbox(checkbox_frame, "IP Address", self.search_ip_address)
+        
+        # Separator
+        tk.Label(checkbox_frame, text=" | ", font=('Segoe UI', 10),
+                bg="#FFFFFF", fg="#CED4DA").pack(side=tk.LEFT, padx=5)
+        
+        # Include Jira checkbox (default checked)
+        self.search_include_jira = tk.BooleanVar(value=True)
+        self._create_custom_checkbox(checkbox_frame, "Include Jira", self.search_include_jira)
         
         # Results listbox
         tk.Label(content, text="Search Results (double-click to open):", font=('Segoe UI', 10, 'bold'),
@@ -190,12 +202,68 @@ class APPanel:
             results = self.db.search_access_points(search_term, fields=search_fields)
             
             if results:
+                # Check if user wants Jira data
+                include_jira = self.search_include_jira.get()
+                
+                if include_jira:
+                    self._log(f"Found {len(results)} APs, fetching Jira data...")
+                    
+                    # Import Jira integration to fetch fresh data
+                    from jira_integration import JiraIntegration
+                    from jira_db_manager import JiraDBManager
+                    from credentials_manager import CredentialsManager
+                    
+                    jira_integration = JiraIntegration(self.db)
+                    jira_db = JiraDBManager(self.db)
+                    credentials = CredentialsManager(self.db).get_credentials('jira')
+                    jira_base_url = credentials.get('url', '').rstrip('/') if credentials else ''
+                else:
+                    self._log(f"Found {len(results)} APs (Jira lookup skipped)")
+                
+                # Display results for each AP
                 for ap in results:
-                    display_text = f"{ap['ap_id']} - Store: {ap.get('store_id', 'N/A')} - {ap.get('ip_address', 'N/A')}"
+                    ap_id = ap['ap_id']
+                    jira_indicator = ""
+                    
+                    # Fetch fresh Jira data if requested
+                    if include_jira:
+                        try:
+                            if jira_integration.is_configured():
+                                # Search Jira for this AP ID
+                                search_term_jira = f"{ap_id}*" if ap_id.isdigit() else ap_id
+                                jql = f'(text ~ "{search_term_jira}" OR summary ~ "{search_term_jira}" OR description ~ "{search_term_jira}" OR comment ~ "{search_term_jira}")'
+                                
+                                success, result, message = jira_integration.search_issues(jql, max_results=50)
+                                
+                                if success and result:
+                                    issues = result.get('issues', [])
+                                    # Store/update in database
+                                    for issue in issues:
+                                        jira_db.store_issue(ap_id, issue, jira_base_url)
+                            
+                            # Now get open ticket count from database
+                            all_issues = jira_db.get_issues_for_ap(ap_id)
+                            open_issues = []
+                            for issue in all_issues:
+                                status = issue.get('status', '').strip()
+                                if status.lower() not in ['resolved', 'closed', 'done']:
+                                    open_issues.append(issue)
+                            
+                            jira_count = len(open_issues)
+                            jira_indicator = f" [Jira: {jira_count}]" if jira_count > 0 else ""
+                            
+                        except Exception as e:
+                            jira_indicator = ""
+                            self._log(f"Error getting Jira for AP {ap_id}: {str(e)}", "error")
+                    
+                    display_text = f"{ap['ap_id']} - Store: {ap.get('store_id', 'N/A')} - {ap.get('ip_address', 'N/A')}{jira_indicator}"
                     self.search_results.insert(tk.END, display_text)
                     self.search_ap_data.append(ap)
                 
-                self._log(f"Found {len(results)} APs matching '{search_term}'")
+                if include_jira:
+                    self._log(f"Search complete with Jira data for {len(results)} APs")
+                else:
+                    self._log(f"Search complete for {len(results)} APs")
             else:
                 self.search_results.insert(tk.END, "No results found")
                 self._log(f"No APs found for '{search_term}'")
@@ -570,13 +638,50 @@ class APPanel:
         tk.Label(content, text="SSH Terminal", font=('Segoe UI', 12, 'bold'),
                 bg="#FFFFFF", fg="#212529").pack(anchor="w", pady=(0, 10))
         
-        tk.Button(content, text="Open SSH Terminal", command=lambda: self._ssh_action(ap_data, 'open'),
+        # Connection button
+        tk.Button(content, text="Open SSH Terminal", command=lambda: self._ssh_open_terminal(ap_data),
                  bg="#6F42C1", fg="white", font=('Segoe UI', 10, 'bold'),
                  padx=20, pady=10, relief=tk.FLAT, cursor="hand2",
                  activebackground="#5A32A3").pack(anchor="w", pady=5)
         
-        tk.Label(content, text="SSH terminal will be shown in lower right panel",
-                font=('Segoe UI', 10), bg="#FFFFFF", fg="#6C757D").pack(pady=20)
+        tk.Label(content, text="Terminal will be shown in lower right panel",
+                font=('Segoe UI', 9), bg="#FFFFFF", fg="#6C757D").pack(anchor="w", pady=(0, 15))
+        
+        # Separator
+        tk.Frame(content, bg="#DEE2E6", height=1).pack(fill="x", pady=10)
+        
+        # Quick SSH Commands section
+        tk.Label(content, text="Quick SSH Commands", font=('Segoe UI', 11, 'bold'),
+                bg="#FFFFFF", fg="#212529").pack(anchor="w", pady=(5, 10))
+        
+        tk.Label(content, text="Execute common commands (requires active SSH connection)",
+                font=('Segoe UI', 9), bg="#FFFFFF", fg="#6C757D").pack(anchor="w", pady=(0, 10))
+        
+        # Command buttons grid
+        btn_frame = tk.Frame(content, bg="#FFFFFF")
+        btn_frame.pack(fill="x", pady=5)
+        
+        ssh_commands = [
+            ("Check Disk Space", lambda: self._ssh_quick_command(ap_data, "check_space", "df -h"), "#17A2B8"),
+            ("List Log Files", lambda: self._ssh_quick_command(ap_data, "list_logs", "cd /opt/esl/accesspoint && ls -la *20*log* 2>/dev/null || echo 'No log files found'"), "#28A745"),
+            ("Remove Old Logs", lambda: self._ssh_remove_old_logs(ap_data), "#FFC107"),
+            ("Download Logs", lambda: self._ssh_download_logs(ap_data), "#007BFF"),
+            ("Exit Service Mode", lambda: self._ssh_quick_command(ap_data, "exit_service", "exit"), "#6C757D"),
+            ("System Info", lambda: self._ssh_quick_command(ap_data, "system_info", "uname -a && uptime"), "#20C997"),
+        ]
+        
+        for i, (text, command, color) in enumerate(ssh_commands):
+            row = i // 2
+            col = i % 2
+            
+            btn = tk.Button(btn_frame, text=text, command=command,
+                          bg=color, fg="white", font=('Segoe UI', 9, 'bold'),
+                          padx=15, pady=8, relief=tk.FLAT, cursor="hand2",
+                          activebackground=color, width=18)
+            btn.grid(row=row, column=col, padx=5, pady=5, sticky="ew")
+        
+        btn_frame.grid_columnconfigure(0, weight=1)
+        btn_frame.grid_columnconfigure(1, weight=1)
     
     def _populate_actions_tab(self, frame, ap_data):
         """Populate actions tab content."""
@@ -1065,6 +1170,58 @@ class APPanel:
         thread = threading.Thread(target=perform_action, daemon=True)
         thread.start()
     
+    def _ssh_open_terminal(self, ap_data):
+        """Open SSH terminal session in content panel."""
+        self._log(f"Opening SSH terminal for AP {ap_data.get('ap_id')}")
+        if self.content_panel:
+            self.content_panel.show_ssh_terminal(ap_data)
+        else:
+            messagebox.showerror("Error", "Content panel not available", parent=self.parent)
+    
+    def _ssh_quick_command(self, ap_data, action_name, command):
+        """Execute a quick SSH command on the active terminal."""
+        self._log(f"SSH Quick Command: {action_name} for AP {ap_data.get('ap_id')}")
+        if self.content_panel:
+            self.content_panel.ssh_execute_command(ap_data, command, action_name)
+        else:
+            messagebox.showerror("Error", "Content panel not available", parent=self.parent)
+    
+    def _ssh_remove_old_logs(self, ap_data):
+        """Remove old log files from the AP."""
+        if not messagebox.askyesno("Confirm", 
+                                   "This will remove old log files (matching *20*log*).\n\nContinue?",
+                                   parent=self.parent):
+            return
+        
+        self._log(f"Removing old logs for AP {ap_data.get('ap_id')}")
+        commands = [
+            "cd /opt/esl/accesspoint",
+            "ls -la *20*log* 2>/dev/null",
+            "rm -f *20*log*",
+            "echo 'Log files removed'"
+        ]
+        
+        if self.content_panel:
+            for cmd in commands:
+                self.content_panel.ssh_execute_command(ap_data, cmd, "remove_logs")
+        else:
+            messagebox.showerror("Error", "Content panel not available", parent=self.parent)
+    
+    def _ssh_download_logs(self, ap_data):
+        """Download log files from the AP via SCP."""
+        from tkinter import filedialog
+        
+        dest_folder = filedialog.askdirectory(title="Select destination folder for log files", parent=self.parent)
+        if not dest_folder:
+            return
+        
+        self._log(f"Downloading logs from AP {ap_data.get('ap_id')} to {dest_folder}")
+        
+        if self.content_panel:
+            self.content_panel.ssh_download_logs(ap_data, dest_folder)
+        else:
+            messagebox.showerror("Error", "Content panel not available", parent=self.parent)
+    
     def _toggle_ssh_server(self, ap_data, enable):
         """Toggle SSH server on/off via browser automation."""
         if not self.content_panel or not self.content_panel.browser_manager:
@@ -1281,13 +1438,9 @@ class APPanel:
             self._log(f"Continuous ping started: {ap_data.get('ip_address', 'N/A')}", "info")
     
     def _continuous_ping(self, ap_data, result_label, ping_state):
-        """Perform continuous ping."""
+        """Perform continuous ping in a background thread."""
         if not ping_state['running']:
             return
-        
-        import subprocess
-        import platform
-        import re
         
         ip_address = ap_data.get('ip_address', '')
         if not ip_address or ip_address == 'N/A':
@@ -1295,39 +1448,64 @@ class APPanel:
             ping_state['running'] = False
             return
         
-        try:
-            # Determine ping command based on OS
-            param = '-n' if platform.system().lower() == 'windows' else '-c'
+        # Run ping in a separate thread to avoid blocking UI
+        import threading
+        
+        def ping_thread():
+            import subprocess
+            import platform
+            import re
             
-            # Execute ping command
-            result = subprocess.run(
-                ['ping', param, '1', ip_address],
-                capture_output=True,
-                text=True,
-                timeout=2
-            )
-            
-            if result.returncode == 0:
-                # Success - extract time if possible
-                output = result.stdout
-                time_match = re.search(r'time[=<](\d+)', output, re.IGNORECASE)
-                if time_match:
-                    ping_time = time_match.group(1)
-                    result_label.config(text=f"✓ Response from {ip_address} (time={ping_time}ms)", fg="#28A745")
-                    self._log(f"Ping: {ip_address} responded in {ping_time}ms", "success")
-                else:
-                    result_label.config(text=f"✓ Response from {ip_address}", fg="#28A745")
-                    self._log(f"Ping: {ip_address} responded", "success")
-            else:
-                result_label.config(text=f"✗ Timeout - No response from {ip_address}", fg="#DC3545")
-                self._log(f"Ping timeout: {ip_address}", "warning")
+            try:
+                # Determine ping command based on OS
+                param = '-n' if platform.system().lower() == 'windows' else '-c'
                 
-        except subprocess.TimeoutExpired:
-            result_label.config(text=f"✗ Timeout - No response from {ip_address}", fg="#DC3545")
-            self._log(f"Ping timeout: {ip_address}", "warning")
-        except Exception as e:
-            result_label.config(text=f"✗ Error: {str(e)}", fg="#DC3545")
-            self._log(f"Ping error for {ip_address}: {str(e)}", "error")
+                # Execute ping command
+                result = subprocess.run(
+                    ['ping', param, '1', ip_address],
+                    capture_output=True,
+                    text=True,
+                    timeout=2
+                )
+                
+                # Update UI from main thread
+                def update_ui():
+                    if not ping_state['running']:
+                        return
+                    
+                    if result.returncode == 0:
+                        # Success - extract time if possible
+                        output = result.stdout
+                        time_match = re.search(r'time[=<](\d+)', output, re.IGNORECASE)
+                        if time_match:
+                            ping_time = time_match.group(1)
+                            result_label.config(text=f"✓ Response from {ip_address} (time={ping_time}ms)", fg="#28A745")
+                            self._log(f"Ping: {ip_address} responded in {ping_time}ms", "success")
+                        else:
+                            result_label.config(text=f"✓ Response from {ip_address}", fg="#28A745")
+                            self._log(f"Ping: {ip_address} responded", "success")
+                    else:
+                        result_label.config(text=f"✗ Timeout - No response from {ip_address}", fg="#DC3545")
+                        self._log(f"Ping timeout: {ip_address}", "warning")
+                
+                self.parent.after(0, update_ui)
+                    
+            except subprocess.TimeoutExpired:
+                def update_timeout():
+                    if ping_state['running']:
+                        result_label.config(text=f"✗ Timeout - No response from {ip_address}", fg="#DC3545")
+                        self._log(f"Ping timeout: {ip_address}", "warning")
+                self.parent.after(0, update_timeout)
+            except Exception as e:
+                def update_error():
+                    if ping_state['running']:
+                        result_label.config(text=f"✗ Error: {str(e)}", fg="#DC3545")
+                        self._log(f"Ping error for {ip_address}: {str(e)}", "error")
+                self.parent.after(0, update_error)
+        
+        # Start ping in background thread
+        thread = threading.Thread(target=ping_thread, daemon=True)
+        thread.start()
         
         # Schedule next ping
         if ping_state['running']:
