@@ -2209,9 +2209,10 @@ class ContentPanel:
         return True
     
     def _handle_cato_warning(self, driver):
-        """Handle CATO Networks warning page."""
+        """Handle CATO Networks warning page (non-blocking)."""
         try:
             import time
+            import threading
             from selenium.webdriver.common.by import By
             from selenium.webdriver.support.ui import WebDriverWait
             from selenium.webdriver.support import expected_conditions as EC
@@ -2254,6 +2255,7 @@ class ContentPanel:
                         continue
                 
                 if proceed_btn:
+                    # Click the button
                     try:
                         proceed_btn.click()
                         self._log("✓ Clicked PROCEED button")
@@ -2261,27 +2263,35 @@ class ContentPanel:
                         driver.execute_script("arguments[0].click();", proceed_btn)
                         self._log("✓ Clicked PROCEED button (JavaScript)")
                     
-                    # Wait 5 seconds then refresh
-                    self._log("Waiting 5 seconds before refresh...")
-                    time.sleep(5)
+                    # Handle waiting and refresh in background thread to avoid UI freeze
+                    def handle_cato_async():
+                        try:
+                            # Wait 5 seconds then refresh
+                            self._log("Waiting 5 seconds before refresh...")
+                            time.sleep(5)
+                            
+                            try:
+                                driver.refresh()
+                                self._log("✓ Refreshed page after CATO click")
+                                time.sleep(2)
+                            except Exception as refresh_error:
+                                # Refresh might timeout, but that's okay - page is loading
+                                self._log(f"⚠ Refresh timeout (expected): {str(refresh_error)[:100]}")
+                            
+                            # Give page time to load after refresh
+                            try:
+                                WebDriverWait(driver, 5).until(
+                                    EC.presence_of_element_located((By.TAG_NAME, "body"))
+                                )
+                                self._log("✓ Page loaded after CATO handling")
+                            except:
+                                # If wait times out, that's okay - we'll verify in Phase 3
+                                self._log("⚠ Wait completed (page may still be loading)")
+                        except Exception as e:
+                            self._log(f"⚠ Error in async CATO handler: {str(e)}")
                     
-                    try:
-                        driver.refresh()
-                        self._log("✓ Refreshed page after CATO click")
-                        time.sleep(2)
-                    except Exception as refresh_error:
-                        # Refresh might timeout, but that's okay - page is loading
-                        self._log(f"⚠ Refresh timeout (expected): {str(refresh_error)[:100]}")
-                    
-                    # Give page time to load after refresh
-                    try:
-                        WebDriverWait(driver, 5).until(
-                            EC.presence_of_element_located((By.TAG_NAME, "body"))
-                        )
-                        self._log("✓ Page loaded after CATO handling")
-                    except:
-                        # If wait times out, that's okay - we'll verify in Phase 3
-                        self._log("⚠ Wait completed (page may still be loading)")
+                    # Start background thread for waiting/refreshing
+                    threading.Thread(target=handle_cato_async, daemon=True).start()
                     
                     return True
                 else:
