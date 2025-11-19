@@ -16,6 +16,9 @@ import re
 class SSHConnection:
     """Represents a single SSH connection to an access point."""
     
+    # ANSI escape code pattern
+    ANSI_ESCAPE = re.compile(r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])')
+    
     def __init__(self, ap_id: str, host: str, username: str, password: str, port: int = 22):
         self.ap_id = ap_id
         self.host = host
@@ -30,6 +33,11 @@ class SSHConnection:
         self.automation_buffer = ""  # Separate buffer for automation that doesn't get cleared
         self.read_thread: Optional[threading.Thread] = None
         self.stop_reading = False
+    
+    @staticmethod
+    def strip_ansi_codes(text: str) -> str:
+        """Remove ANSI escape codes from text."""
+        return SSHConnection.ANSI_ESCAPE.sub('', text)
         
     def connect(self) -> tuple[bool, str]:
         """
@@ -62,6 +70,9 @@ class SSHConnection:
             self.read_thread = threading.Thread(target=self._read_output, daemon=True)
             self.read_thread.start()
             
+            # Start service mode detection
+            threading.Thread(target=self._check_service_mode, daemon=True).start()
+            
             return True, f"Connected to {self.host}"
             
         except paramiko.AuthenticationException:
@@ -77,6 +88,8 @@ class SSHConnection:
             try:
                 if self.shell.recv_ready():
                     data = self.shell.recv(4096).decode('utf-8', errors='replace')
+                    # Strip ANSI color codes
+                    data = self.strip_ansi_codes(data)
                     self.output_buffer += data
                     self.automation_buffer += data  # Also add to automation buffer
                     # Keep automation buffer reasonable size (last 5000 chars)
@@ -85,6 +98,45 @@ class SSHConnection:
             except:
                 time.sleep(0.05)
             time.sleep(0.01)
+    
+    def _check_service_mode(self):
+        """Check if we're in service mode after connection and auto-run status."""
+        import re
+        
+        # Wait for initial connection output
+        time.sleep(4)
+        
+        # Check automation buffer for service mode prompt
+        output = self.get_automation_output(last_chars=1000)
+        
+        if 'servicemode>' in output.lower() or 'service mode' in output.lower():
+            print(f"[SSH] Service mode detected for {self.host}, running status command...")
+            
+            # Send status command
+            self.send_command("status")
+            time.sleep(3)
+            
+            # Get status output
+            status_output = self.get_automation_output(last_chars=2000)
+            print(f"[SSH] Status output length: {len(status_output)} chars")
+            print(f"[SSH] Status output preview: {status_output[:500]}")
+            
+            # Parse Java Version
+            java_match = re.search(r'Java Version[:\s]+([^\n\r]+)', status_output, re.IGNORECASE)
+            if java_match:
+                java_version = java_match.group(1).strip()
+                print(f"[SSH] Found Java Version: {java_version}")
+                
+                # Try to save to database if we can access it
+                try:
+                    from database_manager import DatabaseManager
+                    db = DatabaseManager()
+                    db.update_access_point(self.ap_id, {'java_version': java_version})
+                    print(f"[SSH] Java Version saved to database for AP {self.ap_id}")
+                except Exception as e:
+                    print(f"[SSH] Could not save Java Version: {str(e)}")
+            else:
+                print(f"[SSH] Java Version not found in status output")
     
     def send_command(self, command: str):
         """Send command to the shell."""

@@ -1,6 +1,6 @@
 """
 AP Panel - Upper Left
-Shows multiple AP tabs, each with Overview/Notes/Browser/SSH/Actions sub-tabs
+Shows multiple AP tabs, each with Overview/Browser/SSH sub-tabs
 """
 
 import tkinter as tk
@@ -364,11 +364,6 @@ class APPanel:
         self._populate_ssh_tab(ssh_frame, ap_data)
         sub_notebook.add(ssh_frame, text="SSH Terminal")
         
-        # Actions Tab
-        actions_frame = tk.Frame(sub_notebook.content_area, bg="#FFFFFF")
-        self._populate_actions_tab(actions_frame, ap_data)
-        sub_notebook.add(actions_frame, text="Actions")
-        
         # Store reference
         self.ap_tabs.setdefault(ap_id, {})['sub_notebook'] = sub_notebook
     
@@ -635,73 +630,65 @@ class APPanel:
         content = tk.Frame(frame, bg="#FFFFFF", padx=20, pady=15)
         content.pack(fill=tk.BOTH, expand=True)
         
-        tk.Label(content, text="SSH Terminal", font=('Segoe UI', 12, 'bold'),
-                bg="#FFFFFF", fg="#212529").pack(anchor="w", pady=(0, 10))
-        
-        # Connection button
-        tk.Button(content, text="Open SSH Terminal", command=lambda: self._ssh_open_terminal(ap_data),
-                 bg="#6F42C1", fg="white", font=('Segoe UI', 10, 'bold'),
-                 padx=20, pady=10, relief=tk.FLAT, cursor="hand2",
-                 activebackground="#5A32A3").pack(anchor="w", pady=5)
-        
-        tk.Label(content, text="Terminal will be shown in lower right panel",
+        tk.Label(content, text="Commands will open SSH terminal automatically in a separate window",
                 font=('Segoe UI', 9), bg="#FFFFFF", fg="#6C757D").pack(anchor="w", pady=(0, 15))
         
-        # Separator
-        tk.Frame(content, bg="#DEE2E6", height=1).pack(fill="x", pady=10)
+        # Servicemode Enabled group
+        tk.Label(content, text="Servicemode Enabled", font=('Segoe UI', 10, 'bold'),
+                bg="#FFFFFF", fg="#212529").pack(anchor="w", pady=(5, 8))
         
-        # Quick SSH Commands section
-        tk.Label(content, text="Quick SSH Commands", font=('Segoe UI', 11, 'bold'),
-                bg="#FFFFFF", fg="#212529").pack(anchor="w", pady=(5, 10))
+        servicemode_frame = tk.Frame(content, bg="#FFFFFF")
+        servicemode_frame.pack(fill="x", pady=5)
         
-        tk.Label(content, text="Execute common commands (requires active SSH connection)",
-                font=('Segoe UI', 9), bg="#FFFFFF", fg="#6C757D").pack(anchor="w", pady=(0, 10))
-        
-        # Command buttons grid
-        btn_frame = tk.Frame(content, bg="#FFFFFF")
-        btn_frame.pack(fill="x", pady=5)
-        
-        ssh_commands = [
-            ("Check Disk Space", lambda: self._ssh_quick_command(ap_data, "check_space", "df -h"), "#17A2B8"),
-            ("List Log Files", lambda: self._ssh_quick_command(ap_data, "list_logs", "cd /opt/esl/accesspoint && ls -la *20*log* 2>/dev/null || echo 'No log files found'"), "#28A745"),
-            ("Remove Old Logs", lambda: self._ssh_remove_old_logs(ap_data), "#FFC107"),
-            ("Download Logs", lambda: self._ssh_download_logs(ap_data), "#007BFF"),
-            ("Exit Service Mode", lambda: self._ssh_quick_command(ap_data, "exit_service", "exit"), "#6C757D"),
-            ("System Info", lambda: self._ssh_quick_command(ap_data, "system_info", "uname -a && uptime"), "#20C997"),
+        servicemode_commands = [
+            ("Check Status", lambda: self._ssh_send_command(ap_data, "status"), "#17A2B8"),
+            ("Get Java Version", lambda: self._ssh_get_java_version(ap_data), "#007BFF"),
+            ("Exit Servicemode", lambda: self._ssh_send_command(ap_data, "exit_service"), "#DC3545"),
         ]
         
-        for i, (text, command, color) in enumerate(ssh_commands):
+        for i, (text, command, color) in enumerate(servicemode_commands):
+            btn = tk.Button(servicemode_frame, text=text, command=command,
+                          bg=color, fg="white", font=('Segoe UI', 9, 'bold'),
+                          padx=12, pady=6, relief=tk.FLAT, cursor="hand2",
+                          activebackground=color, width=15)
+            btn.grid(row=0, column=i, padx=3, pady=3, sticky="ew")
+        
+        servicemode_frame.grid_columnconfigure(0, weight=1)
+        servicemode_frame.grid_columnconfigure(1, weight=1)
+        servicemode_frame.grid_columnconfigure(2, weight=1)
+        
+        # Separator
+        tk.Frame(content, bg="#DEE2E6", height=1).pack(fill="x", pady=15)
+        
+        # Operations group
+        tk.Label(content, text="Operations", font=('Segoe UI', 10, 'bold'),
+                bg="#FFFFFF", fg="#212529").pack(anchor="w", pady=(5, 8))
+        
+        operations_frame = tk.Frame(content, bg="#FFFFFF")
+        operations_frame.pack(fill="x", pady=5)
+        
+        operations_commands = [
+            ("Start Servicemode", lambda: self._ssh_send_command(ap_data, "servicemode"), "#FFC107"),
+            ("Disk Space", lambda: self._ssh_send_command(ap_data, "df -h"), "#17A2B8"),
+            ("List Logs", lambda: self._ssh_send_command(ap_data, "cd /opt/esl/accesspoint && ls -la *20*log* 2>/dev/null || echo 'No log files found'"), "#28A745"),
+            ("Download Logs", lambda: self._ssh_download_logs(ap_data), "#FD7E14"),
+            ("Delete Logs", lambda: self._ssh_remove_old_logs(ap_data), "#DC3545"),
+            ("System Info", lambda: self._ssh_send_command(ap_data, "uname -a && uptime"), "#20C997"),
+            ("Check DNS", lambda: self._ssh_send_command(ap_data, "cat /etc/resolv.conf"), "#6F42C1"),
+        ]
+        
+        for i, (text, command, color) in enumerate(operations_commands):
             row = i // 2
             col = i % 2
             
-            btn = tk.Button(btn_frame, text=text, command=command,
+            btn = tk.Button(operations_frame, text=text, command=command,
                           bg=color, fg="white", font=('Segoe UI', 9, 'bold'),
-                          padx=15, pady=8, relief=tk.FLAT, cursor="hand2",
-                          activebackground=color, width=18)
-            btn.grid(row=row, column=col, padx=5, pady=5, sticky="ew")
+                          padx=12, pady=6, relief=tk.FLAT, cursor="hand2",
+                          activebackground=color, width=15)
+            btn.grid(row=row, column=col, padx=3, pady=3, sticky="ew")
         
-        btn_frame.grid_columnconfigure(0, weight=1)
-        btn_frame.grid_columnconfigure(1, weight=1)
-    
-    def _populate_actions_tab(self, frame, ap_data):
-        """Populate actions tab content."""
-        content = tk.Frame(frame, bg="#FFFFFF", padx=20, pady=15)
-        content.pack(fill=tk.BOTH, expand=True)
-        
-        tk.Label(content, text="Quick Actions", font=('Segoe UI', 12, 'bold'),
-                bg="#FFFFFF", fg="#212529").pack(anchor="w", pady=(0, 10))
-        
-        actions = [
-            ("Run Diagnostics", lambda: self._log("Running diagnostics...")),
-            ("Check Logs", lambda: self._log("Checking logs...")),
-            ("Reboot AP", lambda: self._log("Rebooting AP...")),
-        ]
-        
-        for action_text, action_cmd in actions:
-            tk.Button(content, text=action_text, command=action_cmd,
-                     bg="#FFFFFF", fg="#212529", font=('Segoe UI', 9),
-                     padx=15, pady=8, relief=tk.FLAT, cursor="hand2",
-                     activebackground="#E9ECEF", bd=1, width=25).pack(anchor="w", pady=3)
+        operations_frame.grid_columnconfigure(0, weight=1)
+        operations_frame.grid_columnconfigure(1, weight=1)
     
     def _browser_action(self, ap_data, action):
         """Handle browser actions."""
@@ -1178,6 +1165,271 @@ class APPanel:
         else:
             messagebox.showerror("Error", "Content panel not available", parent=self.parent)
     
+    def _ssh_send_command(self, ap_data, command):
+        """Send command to SSH terminal (opens terminal if needed)."""
+        from ssh_helper import SSHManager, SSHConnection
+        import threading
+        import time
+        
+        ap_id = ap_data.get('ap_id')
+        
+        def send_when_ready():
+            # Ensure terminal is open first
+            if self.content_panel:
+                self.content_panel.show_ssh_terminal(ap_data)
+            
+            # Wait for connection to be established
+            max_attempts = 20  # 10 seconds total
+            for attempt in range(max_attempts):
+                window = SSHManager._windows.get("default")
+                if window and ap_id in window.tabs:
+                    connection = window.tabs[ap_id].connection
+                    if connection.connected:
+                        # Connection is ready
+                        if command == "exit_service":
+                            # Special sequence for exiting service mode
+                            self.parent.after(0, lambda: self._log(f"Exiting service mode for AP {ap_id}"))
+                            
+                            commands = [
+                                ("extended matex2010", 2),
+                                ("enableshell true", 2),
+                                ("exit", 1),
+                                ("exit", 2)  # This will close the connection
+                            ]
+                            for cmd, delay in commands:
+                                connection.send_command(cmd)
+                                time.sleep(delay)
+                            
+                            # Wait a moment for disconnection
+                            time.sleep(1)
+                            
+                            # Reconnect
+                            self.parent.after(0, lambda: self._log(f"Reconnecting to AP {ap_id}..."))
+                            terminal_tab = window.tabs[ap_id]
+                            terminal_tab.is_reconnecting = True  # Flag to prevent "Connection closed" message
+                            
+                            # Create new connection
+                            new_connection = SSHConnection(
+                                ap_id=ap_data.get('ap_id'),
+                                host=ap_data.get('ip_address'),
+                                username=ap_data.get('username_ssh', 'esl'),
+                                password=ap_data.get('password_ssh', ''),
+                                port=22
+                            )
+                            
+                            success, message = new_connection.connect()
+                            if success:
+                                # Replace old connection with new one
+                                terminal_tab.connection = new_connection
+                                terminal_tab.is_reconnecting = False
+                                self.parent.after(0, lambda: self._log(f"Reconnected to AP {ap_id}"))
+                            else:
+                                self.parent.after(0, lambda msg=message: self._log(f"Failed to reconnect to AP {ap_id}: {msg}"))
+                                terminal_tab.is_reconnecting = False
+                        else:
+                            # Regular command
+                            connection.send_command(command)
+                        
+                        self.parent.after(0, lambda: self._log(f"Sent command to SSH terminal for AP {ap_id}"))
+                        return
+                
+                time.sleep(0.5)
+            
+            # Timeout
+            def show_warning():
+                messagebox.showwarning("Connection Timeout", 
+                                     f"SSH terminal for AP {ap_id} did not connect in time.\nPlease try again.",
+                                     parent=self.parent)
+            self.parent.after(0, show_warning)
+        
+        threading.Thread(target=send_when_ready, daemon=True).start()
+    
+    def _ssh_get_java_version(self, ap_data):
+        """Get Java version from status command and save to database."""
+        from ssh_helper import SSHManager
+        import threading
+        import time
+        import re
+        
+        ap_id = ap_data.get('ap_id')
+        
+        def get_version_when_ready():
+            # Ensure terminal is open
+            if self.content_panel:
+                self.content_panel.show_ssh_terminal(ap_data)
+            
+            # Wait for connection
+            max_attempts = 20
+            for attempt in range(max_attempts):
+                window = SSHManager._windows.get("default")
+                if window and ap_id in window.tabs:
+                    connection = window.tabs[ap_id].connection
+                    if connection.connected:
+                        # Send status command
+                        connection.send_command("status")
+                        time.sleep(3)
+                        
+                        # Get output from automation buffer
+                        output = connection.get_automation_output(last_chars=2000)
+                        
+                        # Parse Java Version
+                        java_match = re.search(r'Java Version[:\s]+([^\n\r]+)', output, re.IGNORECASE)
+                        if java_match:
+                            java_version = java_match.group(1).strip()
+                            self.parent.after(0, lambda jv=java_version: self._log(f"Found Java Version: {jv}"))
+                            
+                            # Save to database
+                            try:
+                                self.db.update_access_point(ap_id, {'java_version': java_version})
+                                
+                                def show_success():
+                                    messagebox.showinfo("Success", 
+                                                      f"Java Version: {java_version}\n\nSaved to database!",
+                                                      parent=self.parent)
+                                self.parent.after(0, show_success)
+                            except Exception as e:
+                                self.parent.after(0, lambda err=str(e): self._log(f"Error saving Java Version: {err}"))
+                        else:
+                            self.parent.after(0, lambda: self._log("Could not find Java Version in output"))
+                            
+                            def show_warning():
+                                messagebox.showwarning("Not Found", 
+                                                     "Could not find Java Version in status output.\n\nMake sure you're in Service Mode.",
+                                                     parent=self.parent)
+                            self.parent.after(0, show_warning)
+                        return
+                
+                time.sleep(0.5)
+            
+            # Timeout
+            def show_warning():
+                messagebox.showwarning("Connection Timeout", 
+                                     f"SSH terminal for AP {ap_id} did not connect in time.",
+                                     parent=self.parent)
+            self.parent.after(0, show_warning)
+        
+        threading.Thread(target=get_version_when_ready, daemon=True).start()
+    
+    def _ssh_download_logs(self, ap_data):
+        """Download log files from the AP via SCP."""
+        from ssh_helper import SSHManager
+        from tkinter import filedialog
+        import threading
+        
+        ap_id = ap_data.get('ap_id')
+        
+        # Ask user for destination folder
+        dest_folder = filedialog.askdirectory(
+            title="Select destination folder for log files", 
+            parent=self.parent
+        )
+        
+        if not dest_folder:
+            return
+        
+        self._log(f"Downloading logs to: {dest_folder}")
+        
+        def download_when_ready():
+            import paramiko
+            import os
+            import time
+            
+            # Ensure terminal is open
+            if self.content_panel:
+                self.content_panel.show_ssh_terminal(ap_data)
+            
+            # Wait for connection
+            max_attempts = 20
+            for attempt in range(max_attempts):
+                window = SSHManager._windows.get("default")
+                if window and ap_id in window.tabs:
+                    connection = window.tabs[ap_id].connection
+                    if connection.connected:
+                        # Check if in service mode and exit if needed
+                        time.sleep(1)
+                        output = connection.get_automation_output(last_chars=500)
+                        
+                        if "servicemode>" in output.lower():
+                            self.parent.after(0, lambda: self._log("Exiting service mode first..."))
+                            connection.send_command("extended matex2010")
+                            time.sleep(2)
+                            connection.send_command("enableshell true")
+                            time.sleep(2)
+                            connection.send_command("exit")
+                            time.sleep(1)
+                            connection.send_command("exit")
+                            time.sleep(2)
+                        
+                        # Navigate to log folder and list files
+                        connection.send_command("cd /opt/esl/accesspoint")
+                        time.sleep(1)
+                        connection.send_command("ls -la *20*log* 2>/dev/null || echo 'No log files found'")
+                        time.sleep(2)
+                        
+                        # Get file list for display
+                        output = connection.get_automation_output(last_chars=2000)
+                        self.parent.after(0, lambda o=output: self._log(f"Log files found:\n{o}"))
+                        
+                        # Use SFTP to download files
+                        try:
+                            # Create SFTP client using existing SSH connection
+                            sftp_client = paramiko.SFTPClient.from_transport(connection.client.get_transport())
+                            
+                            # Get list of files matching pattern
+                            remote_path = "/opt/esl/accesspoint"
+                            try:
+                                files = sftp_client.listdir(remote_path)
+                                log_files = [f for f in files if '20' in f and 'log' in f.lower()]
+                                
+                                if not log_files:
+                                    self.parent.after(0, lambda: self._log("No log files found to download"))
+                                    def show_info():
+                                        messagebox.showinfo("No Logs", 
+                                                          "No log files found matching pattern *20*log*",
+                                                          parent=self.parent)
+                                    self.parent.after(0, show_info)
+                                    return
+                                
+                                # Download each file
+                                for filename in log_files:
+                                    remote_file = f"{remote_path}/{filename}"
+                                    local_file = os.path.join(dest_folder, filename)
+                                    
+                                    self.parent.after(0, lambda f=filename: self._log(f"Downloading: {f}"))
+                                    sftp_client.get(remote_file, local_file)
+                                    self.parent.after(0, lambda f=filename: self._log(f"✓ Downloaded: {f}"))
+                                
+                                self.parent.after(0, lambda: self._log(f"✓ All log files downloaded to {dest_folder}"))
+                                
+                                def show_success():
+                                    messagebox.showinfo("Success", 
+                                                      f"Downloaded {len(log_files)} log file(s) to:\n{dest_folder}",
+                                                      parent=self.parent)
+                                self.parent.after(0, show_success)
+                                
+                            finally:
+                                sftp_client.close()
+                                
+                        except Exception as e:
+                            self.parent.after(0, lambda err=str(e): self._log(f"✗ Error downloading logs: {err}"))
+                            def show_error():
+                                messagebox.showerror("Error", 
+                                                   f"Failed to download logs:\n{str(e)}",
+                                                   parent=self.parent)
+                            self.parent.after(0, show_error)
+                        return
+                
+                time.sleep(0.5)
+            
+            # Timeout
+            def show_warning():
+                messagebox.showwarning("Connection Timeout", 
+                                     f"SSH terminal for AP {ap_id} did not connect in time.",
+                                     parent=self.parent)
+            self.parent.after(0, show_warning)
+        
+        threading.Thread(target=download_when_ready, daemon=True).start()
+    
     def _ssh_quick_command(self, ap_data, action_name, command):
         """Execute a quick SSH command on the active terminal."""
         self._log(f"SSH Quick Command: {action_name} for AP {ap_data.get('ap_id')}")
@@ -1193,19 +1445,56 @@ class APPanel:
                                    parent=self.parent):
             return
         
-        self._log(f"Removing old logs for AP {ap_data.get('ap_id')}")
-        commands = [
-            "cd /opt/esl/accesspoint",
-            "ls -la *20*log* 2>/dev/null",
-            "rm -f *20*log*",
-            "echo 'Log files removed'"
-        ]
+        from ssh_helper import SSHManager
+        import threading
+        import time
         
-        if self.content_panel:
-            for cmd in commands:
-                self.content_panel.ssh_execute_command(ap_data, cmd, "remove_logs")
-        else:
-            messagebox.showerror("Error", "Content panel not available", parent=self.parent)
+        ap_id = ap_data.get('ap_id')
+        self._log(f"Removing old logs for AP {ap_id}")
+        
+        def remove_when_ready():
+            # Ensure terminal is open
+            if self.content_panel:
+                self.content_panel.show_ssh_terminal(ap_data)
+            
+            # Wait for connection
+            max_attempts = 20
+            for attempt in range(max_attempts):
+                window = SSHManager._windows.get("default")
+                if window and ap_id in window.tabs:
+                    connection = window.tabs[ap_id].connection
+                    if connection.connected:
+                        # Send commands
+                        commands = [
+                            ("cd /opt/esl/accesspoint", 1),
+                            ("ls -la *20*log* 2>/dev/null", 1),
+                            ("rm -f *20*log*", 1),
+                            ("echo 'Log files removed'", 0.5)
+                        ]
+                        
+                        for cmd, delay in commands:
+                            connection.send_command(cmd)
+                            time.sleep(delay)
+                        
+                        self.parent.after(0, lambda: self._log(f"✓ Old log files removed from AP {ap_id}"))
+                        
+                        def show_success():
+                            messagebox.showinfo("Success", 
+                                              f"Log files removed from AP {ap_id}",
+                                              parent=self.parent)
+                        self.parent.after(0, show_success)
+                        return
+                
+                time.sleep(0.5)
+            
+            # Timeout
+            def show_warning():
+                messagebox.showwarning("Connection Timeout", 
+                                     f"SSH terminal for AP {ap_id} did not connect in time.",
+                                     parent=self.parent)
+            self.parent.after(0, show_warning)
+        
+        threading.Thread(target=remove_when_ready, daemon=True).start()
     
     def _ssh_download_logs(self, ap_data):
         """Download log files from the AP via SCP."""
@@ -1219,6 +1508,24 @@ class APPanel:
         
         if self.content_panel:
             self.content_panel.ssh_download_logs(ap_data, dest_folder)
+        else:
+            messagebox.showerror("Error", "Content panel not available", parent=self.parent)
+    
+    def _ssh_exit_service_mode(self, ap_data):
+        """Exit service mode with full command sequence."""
+        self._log(f"Exiting service mode for AP {ap_data.get('ap_id')}")
+        
+        if self.content_panel:
+            self.content_panel.ssh_exit_service_mode(ap_data)
+        else:
+            messagebox.showerror("Error", "Content panel not available", parent=self.parent)
+    
+    def _ssh_check_dns(self, ap_data):
+        """Check DNS settings, exiting service mode first if needed."""
+        self._log(f"Checking DNS settings for AP {ap_data.get('ap_id')}")
+        
+        if self.content_panel:
+            self.content_panel.ssh_check_dns(ap_data)
         else:
             messagebox.showerror("Error", "Content panel not available", parent=self.parent)
     

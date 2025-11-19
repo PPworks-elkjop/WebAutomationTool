@@ -1,0 +1,7 @@
+# xterm.js SSH Terminal Dependencies
+flask==3.0.0
+flask-socketio==5.3.5
+flask-cors==4.0.0
+pywebview==4.4.1
+python-socketio==5.10.0
+eventlet==0.35.1

@@ -1,0 +1,337 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SSH Terminal</title>
+    
+    <!-- xterm.js CSS -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/xterm@5.3.0/css/xterm.css" />
+    
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background-color: #1e1e1e;
+            color: #ffffff;
+            overflow: hidden;
+        }
+        
+        #terminal-container {
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            padding: 10px;
+        }
+        
+        #terminal {
+            width: 100%;
+            height: 100%;
+        }
+        
+        .status-bar {
+            position: absolute;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            height: 24px;
+            background-color: #007acc;
+            color: white;
+            display: flex;
+            align-items: center;
+            padding: 0 10px;
+            font-size: 12px;
+            z-index: 1000;
+        }
+        
+        .status-bar.connected {
+            background-color: #16825d;
+        }
+        
+        .status-bar.error {
+            background-color: #dc3545;
+        }
+        
+        #connection-status {
+            flex: 1;
+        }
+        
+        .loading {
+            display: none;
+            width: 12px;
+            height: 12px;
+            border: 2px solid rgba(255, 255, 255, 0.3);
+            border-top-color: white;
+            border-radius: 50%;
+            animation: spin 0.8s linear infinite;
+            margin-left: 8px;
+        }
+        
+        .loading.active {
+            display: inline-block;
+        }
+        
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+    </style>
+</head>
+<body>
+    <div id="terminal-container">
+        <div id="terminal"></div>
+    </div>
+    
+    <div id="status-bar" class="status-bar">
+        <span id="connection-status">Initializing...</span>
+        <div id="loading" class="loading"></div>
+    </div>
+    
+    <!-- xterm.js -->
+    <script src="https://cdn.jsdelivr.net/npm/xterm@5.3.0/lib/xterm.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/xterm-addon-fit@0.8.0/lib/xterm-addon-fit.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/xterm-addon-web-links@0.9.0/lib/xterm-addon-web-links.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/xterm-addon-search@0.13.0/lib/xterm-addon-search.js"></script>
+    
+    <!-- Socket.IO -->
+    <script src="https://cdn.socket.io/4.5.4/socket.io.min.js"></script>
+    
+    <script>
+        // Initialize xterm.js
+        const term = new Terminal({
+            cursorBlink: true,
+            cursorStyle: 'block',
+            fontSize: 13,
+            fontFamily: 'Consolas, "Courier New", monospace',
+            theme: {
+                background: '#1e1e1e',
+                foreground: '#d4d4d4',
+                cursor: '#ffffff',
+                black: '#000000',
+                red: '#cd3131',
+                green: '#0dbc79',
+                yellow: '#e5e510',
+                blue: '#2472c8',
+                magenta: '#bc3fbc',
+                cyan: '#11a8cd',
+                white: '#e5e5e5',
+                brightBlack: '#666666',
+                brightRed: '#f14c4c',
+                brightGreen: '#23d18b',
+                brightYellow: '#f5f543',
+                brightBlue: '#3b8eea',
+                brightMagenta: '#d670d6',
+                brightCyan: '#29b8db',
+                brightWhite: '#e5e5e5'
+            },
+            allowProposedApi: true
+        });
+        
+        // Add fit addon for responsive sizing
+        const fitAddon = new FitAddon.FitAddon();
+        term.loadAddon(fitAddon);
+        
+        // Add web links addon
+        const webLinksAddon = new WebLinksAddon.WebLinksAddon();
+        term.loadAddon(webLinksAddon);
+        
+        // Add search addon
+        const searchAddon = new SearchAddon.SearchAddon();
+        term.loadAddon(searchAddon);
+        
+        // Open terminal
+        term.open(document.getElementById('terminal'));
+        fitAddon.fit();
+        
+        // Socket.IO connection
+        const socket = io('http://127.0.0.1:5555');
+        
+        let sessionId = null;
+        let isConnected = false;
+        
+        // Status bar elements
+        const statusBar = document.getElementById('status-bar');
+        const statusText = document.getElementById('connection-status');
+        const loading = document.getElementById('loading');
+        
+        function updateStatus(message, type = 'info') {
+            statusText.textContent = message;
+            statusBar.className = 'status-bar';
+            
+            if (type === 'connected') {
+                statusBar.classList.add('connected');
+            } else if (type === 'error') {
+                statusBar.classList.add('error');
+            }
+        }
+        
+        function showLoading(show) {
+            loading.className = show ? 'loading active' : 'loading';
+        }
+        
+        // Socket.IO event handlers
+        socket.on('connect', () => {
+            console.log('WebSocket connected');
+            updateStatus('WebSocket connected');
+        });
+        
+        
+        
+        socket.on('ssh_connected', (data) => {
+            isConnected = true;
+            updateStatus(`Connected to ${data.host}`, 'connected');
+            showLoading(false);
+            term.focus();
+        });
+        
+        socket.on('ssh_output', (data) => {
+            term.write(data.data);
+        });
+        
+        socket.on('ssh_error', (data) => {
+            term.write(`\r\n\x1b[31m✗ Error: ${data.error}\x1b[0m\r\n`);
+            updateStatus(`Error: ${data.error}`, 'error');
+            showLoading(false);
+        });
+        
+        socket.on('java_version', (data) => {
+            // Notify parent window about Java version
+            if (window.parent !== window) {
+                window.parent.postMessage({
+                    type: 'java_version',
+                    version: data.version
+                }, '*');
+            }
+        });
+        
+        socket.on('disconnect', () => {
+            isConnected = false;
+            term.write('\r\n\x1b[33m✗ Disconnected from server\x1b[0m\r\n');
+            updateStatus('Disconnected', 'error');
+        });
+        
+        // Terminal input handler
+        term.onData((data) => {
+            if (isConnected) {
+                socket.emit('ssh_input', { data: data });
+            }
+        });
+        
+        // Terminal resize handler
+        term.onResize((size) => {
+            if (isConnected) {
+                socket.emit('resize', { cols: size.cols, rows: size.rows });
+            }
+        });
+        
+        // Handle window resize
+        window.addEventListener('resize', () => {
+            fitAddon.fit();
+        });
+        
+        // Auto-connect based on URL parameters
+        function getUrlParams() {
+            const params = new URLSearchParams(window.location.search);
+            return {
+                ap_id: params.get('ap_id'),
+                host: params.get('host'),
+                username: params.get('username'),
+                password: params.get('password'),
+                port: params.get('port') || 22
+            };
+        }
+        
+        // Try auto-connect after socket connects
+        socket.on('connected', (data) => {
+            sessionId = data.session_id;
+            console.log('Session ID:', sessionId);
+            
+            // Check if we have connection params in URL
+            const params = getUrlParams();
+            if (params.ap_id && params.host && params.username && params.password) {
+                updateStatus('Auto-connecting...', 'info');
+                showLoading(true);
+                
+                setTimeout(() => {
+                    socket.emit('start_ssh', {
+                        host: params.host,
+                        username: params.username,
+                        password: params.password,
+                        port: params.port
+                    });
+                }, 500);
+            }
+        });
+        
+        // Listen for connection commands from parent (Tkinter)
+        window.addEventListener('message', (event) => {
+            const msg = event.data;
+            
+            if (msg.type === 'connect') {
+                updateStatus('Connecting...', 'info');
+                showLoading(true);
+                
+                socket.emit('start_ssh', {
+                    host: msg.host,
+                    username: msg.username,
+                    password: msg.password,
+                    port: msg.port || 22
+                });
+            } else if (msg.type === 'command') {
+                if (isConnected) {
+                    socket.emit('run_command', { command: msg.command });
+                }
+            } else if (msg.type === 'disconnect') {
+                socket.disconnect();
+            }
+        });
+        
+        // Keyboard shortcuts
+        term.attachCustomKeyEventHandler((event) => {
+            // Ctrl+C for copy (when text is selected)
+            if (event.ctrlKey && event.key === 'c' && term.hasSelection()) {
+                navigator.clipboard.writeText(term.getSelection());
+                return false;
+            }
+            
+            // Ctrl+V for paste
+            if (event.ctrlKey && event.key === 'v') {
+                navigator.clipboard.readText().then(text => {
+                    socket.emit('ssh_input', { data: text });
+                });
+                return false;
+            }
+            
+            // Ctrl+F for search
+            if (event.ctrlKey && event.key === 'f') {
+                const searchTerm = prompt('Search:');
+                if (searchTerm) {
+                    searchAddon.findNext(searchTerm);
+                }
+                return false;
+            }
+            
+            return true;
+        });
+        
+        // Initial message
+        term.writeln('\x1b[1;32m╔═══════════════════════════════════════════════════════╗\x1b[0m');
+        term.writeln('\x1b[1;32m║         SSH Terminal - xterm.js v5.3.0                ║\x1b[0m');
+        term.writeln('\x1b[1;32m╚═══════════════════════════════════════════════════════╝\x1b[0m');
+        term.writeln('');
+        term.writeln('Waiting for connection...');
+        term.writeln('');
+        
+        // Notify parent that terminal is ready
+        if (window.parent !== window) {
+            window.parent.postMessage({ type: 'terminal_ready' }, '*');
+        }
+    </script>
+</body>
+</html>

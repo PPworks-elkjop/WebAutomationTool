@@ -172,7 +172,8 @@ class DatabaseManager:
                 ('connectivity_internet', 'TEXT'),
                 ('connectivity_provisioning', 'TEXT'),
                 ('connectivity_ntp_server', 'TEXT'),
-                ('connectivity_apc_address', 'TEXT')
+                ('connectivity_apc_address', 'TEXT'),
+                ('java_version', 'TEXT')
             ]
             
             for col_name, col_type in new_columns:

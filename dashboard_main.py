@@ -199,12 +199,12 @@ class DashboardMain:
     
     def _create_top_banner(self):
         """Create top banner with app name, logo, and admin notifications."""
-        banner = tk.Frame(self.root, bg="#003D82", height=100)
+        banner = tk.Frame(self.root, bg="#3D6B9E", height=100)
         banner.pack(fill=tk.X, side=tk.TOP)
         banner.pack_propagate(False)
         
         # Left side: Logo and app name
-        left_frame = tk.Frame(banner, bg="#003D82")
+        left_frame = tk.Frame(banner, bg="#3D6B9E")
         left_frame.pack(side=tk.LEFT, padx=20, pady=20)
         
         # SVG-style logo placeholder (will use actual SVG/icon later)
@@ -213,21 +213,21 @@ class DashboardMain:
         logo_frame.pack_propagate(False)
         
         tk.Label(logo_frame, text="V", font=('Segoe UI', 24, 'bold'),
-                bg="white", fg="#003D82").pack(expand=True)
+                bg="white", fg="#3D6B9E").pack(expand=True)
         
         # App name and tagline
-        name_frame = tk.Frame(left_frame, bg="#003D82")
+        name_frame = tk.Frame(left_frame, bg="#3D6B9E")
         name_frame.pack(side=tk.LEFT)
         
         tk.Label(name_frame, text="VERA", font=('Segoe UI', 20, 'bold'),
-                bg="#003D82", fg="white").pack(anchor="w")
+                bg="#3D6B9E", fg="white").pack(anchor="w")
         
         tk.Label(name_frame, text="Vusion support with a human touch", 
                 font=('Segoe UI', 9),
-                bg="#003D82", fg="#D0D0D0").pack(anchor="w")
+                bg="#3D6B9E", fg="#D0D0D0").pack(anchor="w")
         
         # Right side: User info
-        right_frame = tk.Frame(banner, bg="#003D82")
+        right_frame = tk.Frame(banner, bg="#3D6B9E")
         right_frame.pack(side=tk.RIGHT, padx=20, pady=20)
         
         # Show full name from user data (handle both dict and string)
@@ -238,7 +238,7 @@ class DashboardMain:
         
         tk.Label(right_frame, text=f"Welcome, {user_display}", 
                 font=('Segoe UI', 10),
-                bg="#003D82", fg="white").pack(anchor="e")
+                bg="#3D6B9E", fg="white").pack(anchor="e")
         
         # Admin notification area (will be shown when notification exists)
         self.notification_frame = tk.Frame(self.root, bg="#FFF3CD", bd=1, relief=tk.SOLID)
@@ -724,12 +724,12 @@ class DashboardMain:
         detail_window.geometry(f"700x500+{x}+{y}")
         
         # Header
-        header = tk.Frame(detail_window, bg="#0066CC", height=60)
+        header = tk.Frame(detail_window, bg="#3D6B9E", height=60)
         header.pack(fill=tk.X)
         header.pack_propagate(False)
         
         tk.Label(header, text=title, font=('Segoe UI', 14, 'bold'),
-                bg="#0066CC", fg="white").pack(side=tk.LEFT, padx=20, pady=15)
+                bg="#3D6B9E", fg="white").pack(side=tk.LEFT, padx=20, pady=15)
         
         # Content
         content_frame = tk.Frame(detail_window, bg="#FFFFFF")

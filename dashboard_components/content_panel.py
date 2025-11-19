@@ -5,6 +5,7 @@ Dynamic content area showing SSH terminal, browser status, Jira details, etc.
 
 import tkinter as tk
 from tkinter import ttk, scrolledtext, messagebox
+from ssh_helper import SSHManager
 
 
 class ContentPanel:
@@ -186,6 +187,7 @@ class ContentPanel:
             ('Firmware Version', 'firmware_version', False),
             ('Hardware Revision', 'hardware_revision', False),
             ('Build', 'build', False),
+            ('Java Version', 'java_version', False),
             ('Configuration Mode', 'configuration_mode', False),
             ('Service Status', 'service_status', False),
             ('Uptime', 'uptime', False),
@@ -310,6 +312,63 @@ class ContentPanel:
                 
                 # Enable command input
                 self.parent.after(0, lambda: session['command_entry'].config(state='normal'))
+                
+                # Check for service mode after connection
+                def check_service_mode():
+                    # Wait longer for initial output and prompt
+                    time.sleep(4)
+                    
+                    # Collect all available output
+                    collected_output = ""
+                    for _ in range(5):  # Try multiple times to get all output
+                        if shell_channel.recv_ready():
+                            try:
+                                output = shell_channel.recv(4096).decode('utf-8', errors='replace')
+                                collected_output += output
+                            except:
+                                pass
+                        time.sleep(0.5)
+                    
+                    # Check if we're in service mode by looking for the prompt (case-insensitive)
+                    if 'servicemode>' in collected_output.lower() or 'service mode' in collected_output.lower():
+                        log_output("\n✓ Service Mode detected - running 'status' command...\n")
+                        time.sleep(0.5)
+                        
+                        # Send status command
+                        shell_channel.send('status\n')
+                        time.sleep(3)
+                        
+                        # Get status output
+                        status_output = ""
+                        for _ in range(10):  # Collect status output
+                            if shell_channel.recv_ready():
+                                try:
+                                    chunk = shell_channel.recv(4096).decode('utf-8', errors='replace')
+                                    status_output += chunk
+                                except:
+                                    pass
+                            time.sleep(0.3)
+                        
+                        if status_output:
+                            # Parse Java Version
+                            import re
+                            java_match = re.search(r'Java Version[:\s]+([^\n\r]+)', status_output, re.IGNORECASE)
+                            if java_match:
+                                java_version = java_match.group(1).strip()
+                                log_output(f"\n✓ Found Java Version: {java_version}\n")
+                                
+                                # Store in database
+                                try:
+                                    from database_manager import DatabaseManager
+                                    db = DatabaseManager()
+                                    db.update_access_point(ap_id, {'java_version': java_version})
+                                    log_output(f"✓ Java Version saved to database\n")
+                                except Exception as e:
+                                    log_output(f"✗ Error saving Java Version: {str(e)}\n")
+                            else:
+                                log_output("⚠ Could not find Java Version in status output\n")
+                
+                threading.Thread(target=check_service_mode, daemon=True).start()
                 
             except paramiko.AuthenticationException:
                 self.parent.after(0, lambda: terminal_text.insert(tk.END, "\n✗ Authentication failed - check username/password\n"))
@@ -498,24 +557,223 @@ class ContentPanel:
         thread = threading.Thread(target=download, daemon=True)
         thread.start()
     
-    def show_ssh_terminal(self, ap_data):
-        """Show SSH terminal for AP with live connection."""
-        ap_id = ap_data.get('ap_id')
+    def ssh_exit_service_mode(self, ap_data):
+        """Exit service mode with full command sequence and reconnect."""
+        import threading
         
-        # Initialize session storage if needed
         if not hasattr(self, 'current_ssh_sessions'):
             self.current_ssh_sessions = {}
         
-        # Check if session already exists and is connected
-        if ap_id in self.current_ssh_sessions:
-            existing_session = self.current_ssh_sessions[ap_id]
-            if existing_session.get('connected'):
-                # Session already exists and is connected, just show a message
-                self._log(f"SSH terminal for AP {ap_id} is already open and connected")
-                messagebox.showinfo("Already Connected", 
-                                  f"SSH terminal for AP {ap_id} is already active in the lower right panel",
-                                  parent=self.parent)
-                return
+        ap_id = ap_data.get('ap_id')
+        if ap_id not in self.current_ssh_sessions:
+            messagebox.showinfo("Not Connected", 
+                              f"Please open SSH terminal for AP {ap_id} first",
+                              parent=self.parent)
+            return
+        
+        session = self.current_ssh_sessions[ap_id]
+        
+        if not session['connected'] or not session['shell_channel']:
+            messagebox.showwarning("Not Connected", 
+                                 f"SSH connection for AP {ap_id} is not active",
+                                 parent=self.parent)
+            return
+        
+        def exit_sequence():
+            try:
+                terminal_text = session['terminal_text']
+                shell_channel = session['shell_channel']
+                
+                def log_output(msg):
+                    self.parent.after(0, lambda m=msg: terminal_text.insert(tk.END, m))
+                    self.parent.after(0, lambda: terminal_text.see(tk.END))
+                
+                log_output("\n" + "="*60 + "\n")
+                log_output("Exiting Service Mode\n")
+                log_output("="*60 + "\n")
+                
+                # Command sequence with proper delays for responses
+                commands = [
+                    ("extended matex2010", 2),
+                    ("enableshell true", 2),
+                    ("exit", 1.5),
+                    ("exit", 2)
+                ]
+                
+                for cmd, delay in commands:
+                    log_output(f"$ {cmd}\n")
+                    shell_channel.send(cmd + '\n')
+                    
+                    # Wait and collect all response data
+                    time.sleep(delay)
+                    
+                    # Drain the receive buffer completely
+                    response_parts = []
+                    attempts = 0
+                    while attempts < 10:
+                        try:
+                            if shell_channel.recv_ready():
+                                chunk = shell_channel.recv(8192).decode('utf-8', errors='replace')
+                                response_parts.append(chunk)
+                                attempts = 0  # Reset if we got data
+                            else:
+                                attempts += 1
+                                time.sleep(0.2)
+                        except:
+                            break
+                    
+                    if response_parts:
+                        log_output(''.join(response_parts))
+                
+                log_output("\n✓ Service mode exit sequence complete\n")
+                log_output("⟳ Reconnecting to establish bash access...\n\n")
+                
+                # Disconnect and reconnect
+                self.parent.after(0, lambda: self._disconnect_ssh(session))
+                time.sleep(2)
+                
+                # Reconnect
+                self.parent.after(0, lambda: self._connect_ssh(session))
+                
+            except Exception as e:
+                def show_error():
+                    messagebox.showerror("Error", 
+                                       f"Failed to exit service mode: {str(e)}",
+                                       parent=self.parent)
+                self.parent.after(0, show_error)
+        
+        thread = threading.Thread(target=exit_sequence, daemon=True)
+        thread.start()
+    
+    def ssh_check_dns(self, ap_data):
+        """Check DNS settings, exiting service mode first if needed."""
+        import threading
+        
+        if not hasattr(self, 'current_ssh_sessions'):
+            self.current_ssh_sessions = {}
+        
+        ap_id = ap_data.get('ap_id')
+        if ap_id not in self.current_ssh_sessions:
+            messagebox.showinfo("Not Connected", 
+                              f"Please open SSH terminal for AP {ap_id} first",
+                              parent=self.parent)
+            return
+        
+        session = self.current_ssh_sessions[ap_id]
+        
+        if not session['connected'] or not session['shell_channel']:
+            messagebox.showwarning("Not Connected", 
+                                 f"SSH connection for AP {ap_id} is not active",
+                                 parent=self.parent)
+            return
+        
+        def check_dns():
+            try:
+                terminal_text = session['terminal_text']
+                shell_channel = session['shell_channel']
+                
+                def log_output(msg):
+                    self.parent.after(0, lambda m=msg: terminal_text.insert(tk.END, m))
+                    self.parent.after(0, lambda: terminal_text.see(tk.END))
+                
+                log_output("\n" + "="*60 + "\n")
+                log_output("Checking DNS Settings\n")
+                log_output("="*60 + "\n")
+                
+                # Check if in service mode
+                time.sleep(0.5)
+                shell_channel.send('\n')
+                time.sleep(0.5)
+                
+                if shell_channel.recv_ready():
+                    prompt = shell_channel.recv(1024).decode('utf-8', errors='replace')
+                    
+                    if 'ServiceMode>' in prompt or 'servicemode>' in prompt.lower():
+                        log_output("⚠ Currently in Service Mode - exiting first...\n\n")
+                        
+                        # Exit service mode sequence
+                        commands = [
+                            ("extended matex2010", 1),
+                            ("enableshell true", 1),
+                            ("exit", 1),
+                            ("exit", 2)
+                        ]
+                        
+                        for cmd, delay in commands:
+                            log_output(f"$ {cmd}\n")
+                            shell_channel.send(cmd + '\n')
+                            time.sleep(delay)
+                            
+                            if shell_channel.recv_ready():
+                                response = shell_channel.recv(4096).decode('utf-8', errors='replace')
+                                log_output(response)
+                        
+                        time.sleep(2)
+                
+                # Now check DNS
+                log_output("\n$ cat /etc/resolv.conf\n")
+                shell_channel.send('cat /etc/resolv.conf\n')
+                time.sleep(1.5)
+                
+                if shell_channel.recv_ready():
+                    dns_output = shell_channel.recv(4096).decode('utf-8', errors='replace')
+                    log_output(dns_output)
+                
+                log_output("\n✓ DNS check complete\n")
+                
+            except Exception as e:
+                def show_error():
+                    messagebox.showerror("Error", 
+                                       f"Failed to check DNS: {str(e)}",
+                                       parent=self.parent)
+                self.parent.after(0, show_error)
+        
+        thread = threading.Thread(target=check_dns, daemon=True)
+        thread.start()
+    
+    def show_ssh_terminal(self, ap_data):
+        """Open SSH terminal in separate window using ssh_helper."""
+        ap_id = ap_data.get('ap_id')
+        host = ap_data.get('ip_address')
+        username = ap_data.get('username_ssh', 'esl')
+        password = ap_data.get('password_ssh', '')
+        
+        # Validate connection info
+        if not host:
+            messagebox.showerror("Missing Information", 
+                               "IP address is required for SSH connection",
+                               parent=self.parent)
+            return
+        
+        if not password:
+            messagebox.showwarning("Missing Password", 
+                                 "SSH password not set for this AP. Connection may fail.",
+                                 parent=self.parent)
+        
+        # Open SSH terminal in separate window with tabs
+        self._log(f"Opening SSH terminal for AP {ap_id} ({username}@{host})")
+        
+        success, message = SSHManager.open_ssh_connection(
+            parent=self.parent,
+            ap_id=ap_id,
+            host=host,
+            username=username,
+            password=password,
+            port=22,
+            window_id="default"  # Use default window so all APs open in same window as tabs
+        )
+        
+        if success:
+            self._log(f"SSH terminal opened: {message}")
+            # Show info in content panel
+            self._show_ssh_info(ap_data)
+        else:
+            self._log(f"SSH connection failed: {message}")
+            messagebox.showerror("SSH Connection Failed", message, parent=self.parent)
+    
+    def _show_ssh_info(self, ap_data):
+        """Display SSH terminal info in content panel."""
+        ap_id = ap_data.get('ap_id')
         
         self._clear_frame(self.ap_details_frame)
         self.current_content_type = "ssh"
@@ -524,118 +782,55 @@ class ContentPanel:
         self.header_label.config(text=f"SSH Terminal - AP {ap_id}")
         self.popout_button.pack_forget()
         
-        content = tk.Frame(self.ap_details_frame, bg="#000000", padx=10, pady=10)
+        content = tk.Frame(self.ap_details_frame, bg="#2C3E50", padx=30, pady=30)
         content.pack(fill=tk.BOTH, expand=True)
         
-        # Create terminal output area
-        terminal_frame = tk.Frame(content, bg="#000000")
-        terminal_frame.pack(fill=tk.BOTH, expand=True)
+        # Icon and title
+        icon_label = tk.Label(
+            content,
+            text="🖥️",
+            font=('Segoe UI', 48),
+            bg="#2C3E50",
+            fg="white"
+        )
+        icon_label.pack(pady=10)
         
-        terminal_text = scrolledtext.ScrolledText(terminal_frame, font=('Consolas', 10),
-                                                  bg="#000000", fg="#00FF00",
-                                                  insertbackground="#00FF00",
-                                                  wrap=tk.WORD)
-        terminal_text.pack(fill=tk.BOTH, expand=True)
+        title_label = tk.Label(
+            content,
+            text="SSH Terminal Opened",
+            font=('Segoe UI', 18, 'bold'),
+            bg="#2C3E50",
+            fg="white"
+        )
+        title_label.pack(pady=5)
         
-        # Create command input area
-        input_frame = tk.Frame(content, bg="#1a1a1a", padx=5, pady=5)
-        input_frame.pack(fill=tk.X, pady=(5, 0))
+        conn_label = tk.Label(
+            content,
+            text=f"{ap_data.get('username_ssh', 'esl')}@{ap_data.get('ip_address', 'N/A')}",
+            font=('Consolas', 12),
+            bg="#2C3E50",
+            fg="#95A5A6"
+        )
+        conn_label.pack(pady=5)
         
-        # Add label for clarity
-        tk.Label(input_frame, text="Command:", bg="#1a1a1a", fg="#00FF00",
-                font=('Consolas', 9)).pack(side=tk.LEFT, padx=(0, 5))
+        status_label = tk.Label(
+            content,
+            text="Terminal window opened in separate window",
+            font=('Segoe UI', 11),
+            bg="#2C3E50",
+            fg="#16825d"
+        )
+        status_label.pack(pady=10)
         
-        # Create Entry without textvariable first, we'll get value directly
-        command_entry = tk.Entry(input_frame,
-                                font=('Consolas', 11), bg="#0a0a0a", fg="#00FF00",
-                                insertbackground="#00FF00", relief=tk.SOLID, bd=1,
-                                highlightthickness=2, highlightcolor="#00FF00",
-                                highlightbackground="#333333")
-        command_entry.pack(fill=tk.X, side=tk.LEFT, expand=True, padx=(0, 5), ipady=3)
-        
-        # Store session info
-        session = {
-            'ap_data': ap_data,
-            'terminal_text': terminal_text,
-            'command_entry': command_entry,
-            'ssh_client': None,
-            'shell_channel': None,
-            'connected': False,
-            'output_thread': None,
-            'content_frame': content  # Store frame reference to prevent destruction
-        }
-        
-        # Store session by AP ID for quick command access
-        self.current_ssh_sessions[ap_id] = session
-        
-        def send_command(event=None):
-            """Send command to SSH session."""
-            # Get command directly from Entry widget
-            cmd = command_entry.get().strip()
-            
-            # Log that send was called
-            self._log(f"SSH send_command called - cmd: '{cmd}', connected: {session.get('connected')}")
-            
-            if not session.get('connected') or not session.get('shell_channel'):
-                if cmd:  # Only show message if user actually tried to send something
-                    terminal_text.insert(tk.END, f"\n⚠ Not connected to SSH - please wait for connection\n")
-                    terminal_text.insert(tk.END, f"   You typed: {cmd}\n")
-                    terminal_text.see(tk.END)
-                    command_entry.delete(0, tk.END)
-                else:
-                    terminal_text.insert(tk.END, "\n⚠ Not connected to SSH yet\n")
-                    terminal_text.see(tk.END)
-                return 'break'
-            
-            if cmd:
-                try:
-                    # Echo command in terminal
-                    terminal_text.insert(tk.END, f"$ {cmd}\n")
-                    terminal_text.see(tk.END)
-                    
-                    # Send to SSH
-                    session['shell_channel'].send(cmd + '\n')
-                    command_entry.delete(0, tk.END)
-                    self._log(f"SSH command sent successfully: {cmd}")
-                except Exception as e:
-                    error_msg = f"\n✗ Error sending command: {str(e)}\n"
-                    terminal_text.insert(tk.END, error_msg)
-                    terminal_text.see(tk.END)
-                    self._log(f"SSH command error: {str(e)}")
-            else:
-                terminal_text.insert(tk.END, "⚠ Please enter a command\n")
-                terminal_text.see(tk.END)
-            
-            return 'break'
-        
-        command_entry.bind('<Return>', send_command)
-        
-        # Give focus to command entry so user can start typing immediately
-        def set_focus():
-            command_entry.focus_force()
-            # Log to verify entry is enabled
-            self._log(f"SSH command entry ready - state: {command_entry['state']}")
-        
-        # Set focus after a brief delay to ensure widget is fully rendered
-        self.parent.after(100, set_focus)
-        
-        send_btn = tk.Button(input_frame, text="Send", command=send_command,
-                           bg="#28A745", fg="white", font=('Segoe UI', 9, 'bold'),
-                           padx=15, relief=tk.FLAT, cursor="hand2")
-        send_btn.pack(side=tk.RIGHT)
-        
-        disconnect_btn = tk.Button(input_frame, text="Disconnect",
-                                  command=lambda: self._disconnect_ssh(session),
-                                  bg="#DC3545", fg="white", font=('Segoe UI', 9, 'bold'),
-                                  padx=15, relief=tk.FLAT, cursor="hand2")
-        disconnect_btn.pack(side=tk.RIGHT, padx=(0, 5))
-        
-        # Start SSH connection in background
-        terminal_text.insert('1.0', f"SSH Terminal - AP {ap_id}\n")
-        terminal_text.insert(tk.END, "Connecting...\n\n")
-        
-        self._log(f"Opening SSH terminal for AP {ap_id}")
-        self._connect_ssh(session)
+        hint_label = tk.Label(
+            content,
+            text="• Type commands directly in the terminal window\n• Multiple APs open as tabs in the same window\n• Terminal has dark theme for better readability",
+            font=('Segoe UI', 10),
+            bg="#2C3E50",
+            fg="#95A5A6",
+            justify=tk.CENTER
+        )
+        hint_label.pack(pady=15)
     
     def show_provisioning_actions(self, ap_data, ap_panel):
         """Show provisioning actions in content panel."""
