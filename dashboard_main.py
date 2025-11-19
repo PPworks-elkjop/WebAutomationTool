@@ -21,6 +21,9 @@ class DashboardMain:
         self.current_user = current_user
         self.db = db
         
+        # Get username string from current_user (dict or string)
+        self.username = current_user.get('username') if isinstance(current_user, dict) else current_user
+        
         # Window setup
         self.root.title("VERA - Vusion support with a human touch")
         self.root.configure(bg="#F0F0F0")
@@ -79,8 +82,6 @@ class DashboardMain:
         
         # File Menu
         self._create_menu_button(menubar_frame, "File", [
-            ("Search AP", self._search_ap),
-            None,  # Separator
             ("Exit", self._on_exit)
         ])
         
@@ -91,20 +92,27 @@ class DashboardMain:
             ("Batch SSH Operations", self._open_batch_ssh)
         ])
         
-        # Admin Menu
-        self._create_menu_button(menubar_frame, "Admin", [
-            ("Add New AP", self._add_new_ap),
-            None,
-            ("Post System Notification", self._post_notification),
-            None,
-            ("Manage AP Credentials", self._open_credentials_manager),
-            ("Manage Vusion API Keys", self._open_vusion_config),
-            ("Manage Users", self._open_user_management),
-            ("Change Password", self._change_password),
-            None,
-            ("Admin Settings", self._open_admin_settings),
-            ("Audit Log", self._open_audit_log)
-        ])
+        # Admin Menu - different items based on user role
+        is_admin = self.db.is_admin(self.username)
+        if is_admin:
+            # Admin users see all options
+            self._create_menu_button(menubar_frame, "Admin", [
+                ("Post System Notification", self._post_notification),
+                None,
+                ("Manage AP Credentials", self._open_credentials_manager),
+                ("Manage Vusion API Keys", self._open_vusion_config),
+                ("Manage Users", self._open_user_management),
+                ("Change Password", self._change_password),
+                None,
+                ("Admin Settings", self._open_admin_settings),
+                ("Audit Log", self._open_audit_log)
+            ])
+        else:
+            # Regular users only see limited options
+            self._create_menu_button(menubar_frame, "User", [
+                ("Manage AP Credentials", self._open_credentials_manager),
+                ("Change Password", self._change_password)
+            ])
         
         # Help Menu
         self._create_menu_button(menubar_frame, "Help", [
@@ -432,15 +440,17 @@ class DashboardMain:
     def _open_credentials_manager(self):
         """Open credentials manager window (modern style)."""
         try:
-            # TODO: Create credentials_manager_v3.py with modern style
-            from credentials_manager import CredentialsManager
-            CredentialsManager(tk.Toplevel(), self.current_user, self.db)
+            from credential_manager_modern import ModernCredentialManager
+            ModernCredentialManager(current_user=self.current_user, parent=self.root, db_manager=self.db)
             self.activity_log.log_message("Admin", "Opened Credentials Manager", "info")
         except Exception as e:
             messagebox.showerror("Error", f"Failed to open Credentials Manager: {e}")
     
     def _open_vusion_config(self):
         """Open Vusion API configuration dialog."""
+        if not self.db.is_admin(self.username):
+            messagebox.showerror("Access Denied", "This feature is only available to administrators.")
+            return
         try:
             from vusion_config_dialog import VusionAPIConfigDialog
             dialog = VusionAPIConfigDialog(self.root)
@@ -450,11 +460,13 @@ class DashboardMain:
             messagebox.showerror("Error", f"Failed to open Vusion API configuration:\n{str(e)}")
     
     def _open_user_management(self):
-        """Open user management window (modern style)."""
+        """Open user management window."""
+        if not self.db.is_admin(self.username):
+            messagebox.showerror("Access Denied", "This feature is only available to administrators.")
+            return
         try:
-            # TODO: Create user_management_v3.py with modern style
-            from user_management import UserManagement
-            UserManagement(tk.Toplevel(), self.current_user, self.db)
+            from user_manager_modern import ModernUserManager
+            ModernUserManager(self.current_user, self.root, self.db)
             self.activity_log.log_message("Admin", "Opened User Management", "info")
         except Exception as e:
             messagebox.showerror("Error", f"Failed to open User Management: {e}")
@@ -470,6 +482,9 @@ class DashboardMain:
     
     def _open_admin_settings(self):
         """Open admin settings window."""
+        if not self.db.is_admin(self.username):
+            messagebox.showerror("Access Denied", "This feature is only available to administrators.")
+            return
         try:
             from admin_settings import AdminSettingsDialog
             AdminSettingsDialog(self.root, self.current_user, self.db)
@@ -479,6 +494,9 @@ class DashboardMain:
     
     def _open_audit_log(self):
         """Open audit log window."""
+        if not self.db.is_admin(self.username):
+            messagebox.showerror("Access Denied", "This feature is only available to administrators.")
+            return
         try:
             from audit_log_viewer import AuditLogViewer
             AuditLogViewer(tk.Toplevel(), self.current_user, self.db)
@@ -725,14 +743,14 @@ class DashboardMain:
         """Show full notification details in a window."""
         detail_window = tk.Toplevel(self.root)
         detail_window.title(title)
-        detail_window.geometry("700x500")
+        detail_window.geometry("700x650")
         detail_window.transient(self.root)
         
         # Center window
         detail_window.update_idletasks()
         x = (detail_window.winfo_screenwidth() // 2) - (700 // 2)
-        y = (detail_window.winfo_screenheight() // 2) - (500 // 2)
-        detail_window.geometry(f"700x500+{x}+{y}")
+        y = (detail_window.winfo_screenheight() // 2) - (650 // 2)
+        detail_window.geometry(f"700x650+{x}+{y}")
         
         # Header
         header = tk.Frame(detail_window, bg="#3D6B9E", height=60)
@@ -746,16 +764,67 @@ class DashboardMain:
         content_frame = tk.Frame(detail_window, bg="#FFFFFF")
         content_frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=20)
         
-        detail_text = scrolledtext.ScrolledText(content_frame, font=('Segoe UI', 10),
-                                               wrap=tk.WORD, bg="#FFFFFF", bd=0)
-        detail_text.pack(fill=tk.BOTH, expand=True)
-        detail_text.insert('1.0', details)
+        # Text widget with scrollbar
+        text_container = tk.Frame(content_frame, bg="#FFFFFF", relief=tk.SOLID, bd=1)
+        text_container.pack(fill=tk.BOTH, expand=True)
+        
+        scrollbar = tk.Scrollbar(text_container)
+        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        
+        detail_text = tk.Text(text_container, font=('Segoe UI', 10),
+                             wrap=tk.WORD, bg="#FFFFFF", bd=0, padx=10, pady=10,
+                             yscrollcommand=scrollbar.set)
+        detail_text.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        scrollbar.config(command=detail_text.yview)
+        
+        # Configure tags for links
+        detail_text.tag_configure("link", foreground="#0066CC", underline=True)
+        detail_text.tag_bind("link", "<Enter>", lambda e: detail_text.config(cursor="hand2"))
+        detail_text.tag_bind("link", "<Leave>", lambda e: detail_text.config(cursor=""))
+        
+        # Parse and insert text with clickable links
+        import re
+        url_pattern = r'(https?://[^\s]+)'
+        
+        last_pos = 0
+        for match in re.finditer(url_pattern, details):
+            # Insert text before the URL
+            if match.start() > last_pos:
+                detail_text.insert(tk.END, details[last_pos:match.start()])
+            
+            # Insert the URL as a clickable link
+            url = match.group(0)
+            start_index = detail_text.index(tk.END + "-1c")
+            detail_text.insert(tk.END, url)
+            end_index = detail_text.index(tk.END + "-1c")
+            detail_text.tag_add("link", start_index, end_index)
+            
+            # Bind click event to open URL in Edge
+            detail_text.tag_bind("link", "<Button-1>", 
+                               lambda e, link=url: self._open_url_in_edge(link))
+            
+            last_pos = match.end()
+        
+        # Insert remaining text after last URL
+        if last_pos < len(details):
+            detail_text.insert(tk.END, details[last_pos:])
+        
         detail_text.config(state='disabled')
         
         # Close button
         tk.Button(detail_window, text="Close", command=detail_window.destroy,
                  bg="#6C757D", fg="white", font=('Segoe UI', 10),
                  padx=20, pady=8, relief=tk.FLAT, cursor="hand2").pack(pady=(0, 20))
+    
+    def _open_url_in_edge(self, url):
+        """Open URL in Microsoft Edge browser."""
+        import subprocess
+        try:
+            subprocess.Popen(['msedge', url])
+        except Exception as e:
+            # Fallback to default browser if Edge is not available
+            import webbrowser
+            webbrowser.open(url)
     
     def _dismiss_notification(self):
         """Dismiss the notification banner."""
@@ -764,6 +833,9 @@ class DashboardMain:
     
     def _post_notification(self):
         """Admin: Post a system notification."""
+        if not self.db.is_admin(self.username):
+            messagebox.showerror("Access Denied", "This feature is only available to administrators.")
+            return
         dialog = tk.Toplevel(self.root)
         dialog.title("Post System Notification")
         dialog.geometry("600x500")
@@ -782,11 +854,26 @@ class DashboardMain:
         tk.Label(content, text="Post System Notification", font=('Segoe UI', 14, 'bold'),
                 bg="#FFFFFF", fg="#212529").pack(anchor="w", pady=(0, 20))
         
+        # Load existing notification if present
+        import json
+        import os
+        notification_file = os.path.join(os.path.dirname(__file__), 'admin_notification.json')
+        existing_notification = None
+        
+        if os.path.exists(notification_file):
+            try:
+                with open(notification_file, 'r', encoding='utf-8') as f:
+                    existing_notification = json.load(f)
+            except:
+                pass
+        
         # Title
         tk.Label(content, text="Title:", font=('Segoe UI', 10),
                 bg="#FFFFFF", fg="#495057").pack(anchor="w", pady=(0, 5))
         title_entry = tk.Entry(content, font=('Segoe UI', 10), bd=1, relief=tk.SOLID)
         title_entry.pack(fill=tk.X, pady=(0, 15))
+        if existing_notification:
+            title_entry.insert(0, existing_notification.get('title', ''))
         title_entry.focus()
         
         # Short message
@@ -794,6 +881,8 @@ class DashboardMain:
                 bg="#FFFFFF", fg="#495057").pack(anchor="w", pady=(0, 5))
         message_entry = tk.Entry(content, font=('Segoe UI', 10), bd=1, relief=tk.SOLID)
         message_entry.pack(fill=tk.X, pady=(0, 15))
+        if existing_notification:
+            message_entry.insert(0, existing_notification.get('message', ''))
         
         # Detailed message
         tk.Label(content, text="Detailed Message (shown when 'Read More' is clicked):", 
@@ -802,6 +891,8 @@ class DashboardMain:
         details_text = scrolledtext.ScrolledText(content, font=('Segoe UI', 10), 
                                                 wrap=tk.WORD, height=10, bd=1, relief=tk.SOLID)
         details_text.pack(fill=tk.BOTH, expand=True, pady=(0, 20))
+        if existing_notification:
+            details_text.insert('1.0', existing_notification.get('details', ''))
         
         def save_notification():
             title = title_entry.get().strip()

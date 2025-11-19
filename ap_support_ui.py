@@ -350,18 +350,23 @@ class APSearchDialog:
                        background="#FFFFFF",
                        foreground="#333333",
                        fieldbackground="#FFFFFF",
-                       font=("Segoe UI", 9))
+                       font=("Segoe UI", 10),
+                       rowheight=28)
         style.configure("Search.Treeview.Heading",
-                       font=("Segoe UI", 10, "bold"),
-                       background="#F0F0F0",
-                       foreground="#333333")
+                       font=("Segoe UI", 11, "bold"),
+                       background="#3D6B9E",
+                       foreground="white",
+                       relief="flat",
+                       padding=8)
+        style.map("Search.Treeview.Heading",
+                 background=[('active', '#2D5B8E')])
         style.map("Search.Treeview",
                  background=[('selected', '#007BFF')],
                  foreground=[('selected', 'white')])
         
         self.tree = ttk.Treeview(
             tree_frame,
-            columns=("ap_id", "store_id", "ip_address", "type", "status", "support_status", "tickets"),
+            columns=("ap_id", "store_id", "ip_address", "jira_count"),
             show="headings",
             yscrollcommand=vsb.set,
             xscrollcommand=hsb.set,
@@ -371,22 +376,16 @@ class APSearchDialog:
         vsb.config(command=self.tree.yview)
         hsb.config(command=self.tree.xview)
         
-        # Configure columns with sortable headers
-        self.tree.heading("ap_id", text="AP ID", command=lambda: self._sort_by_column("ap_id"))
+        # Configure columns with sortable headers (with sort indicators)
+        self.tree.heading("ap_id", text="AP-ID ▼", command=lambda: self._sort_by_column("ap_id"))
         self.tree.heading("store_id", text="Store ID", command=lambda: self._sort_by_column("store_id"))
-        self.tree.heading("ip_address", text="IP Address", command=lambda: self._sort_by_column("ip_address"))
-        self.tree.heading("type", text="Type", command=lambda: self._sort_by_column("type"))
-        self.tree.heading("status", text="Status", command=lambda: self._sort_by_column("status"))
-        self.tree.heading("support_status", text="Support Status", command=lambda: self._sort_by_column("support_status"))
-        self.tree.heading("tickets", text="Open Tickets", command=lambda: self._sort_by_column("tickets"))
+        self.tree.heading("ip_address", text="IP", command=lambda: self._sort_by_column("ip_address"))
+        self.tree.heading("jira_count", text="# Jira", command=lambda: self._sort_by_column("jira_count"))
         
-        self.tree.column("ap_id", width=120, anchor="w")
-        self.tree.column("store_id", width=100, anchor="center")
-        self.tree.column("ip_address", width=130, anchor="center")
-        self.tree.column("type", width=100, anchor="w")
-        self.tree.column("status", width=90, anchor="center")
-        self.tree.column("support_status", width=130, anchor="center")
-        self.tree.column("tickets", width=110, anchor="center")
+        self.tree.column("ap_id", width=280, anchor="w")
+        self.tree.column("store_id", width=180, anchor="center")
+        self.tree.column("ip_address", width=220, anchor="center")
+        self.tree.column("jira_count", width=180, anchor="center")
         
         # Grid layout
         self.tree.grid(row=0, column=0, sticky="nsew")
@@ -433,9 +432,11 @@ class APSearchDialog:
         
         # Sort items
         try:
-            # Try numeric sort for tickets column
-            if col == "tickets":
-                items.sort(key=lambda x: (x[0] == '-', int(x[0]) if x[0] != '-' else 0), reverse=self.sort_reverse)
+            # Try numeric sort for jira count and store_id columns
+            if col == "jira_count":
+                items.sort(key=lambda x: int(x[0]) if x[0].isdigit() else 0, reverse=self.sort_reverse)
+            elif col == "store_id":
+                items.sort(key=lambda x: int(x[0]) if x[0].isdigit() else 0, reverse=self.sort_reverse)
             else:
                 items.sort(key=lambda x: x[0].lower(), reverse=self.sort_reverse)
         except:
@@ -448,13 +449,10 @@ class APSearchDialog:
         # Update column headings to show sort direction
         for column in self.tree['columns']:
             heading_text = {
-                'ap_id': 'AP ID',
+                'ap_id': 'AP-ID',
                 'store_id': 'Store ID',
-                'ip_address': 'IP Address',
-                'type': 'Type',
-                'status': 'Status',
-                'support_status': 'Support Status',
-                'tickets': 'Open Tickets'
+                'ip_address': 'IP',
+                'jira_count': '# Jira'
             }.get(column, column)
             
             if column == col:
@@ -497,13 +495,15 @@ class APSearchDialog:
                 ap.get('ap_id', ''),
                 ap.get('store_id', ''),
                 ap.get('ip_address', ''),
-                ap.get('type', ''),
-                ap.get('status', 'unknown'),
-                ap.get('support_status', 'active'),
-                str(open_tickets) if open_tickets > 0 else '-'
+                str(open_tickets) if open_tickets > 0 else '0'
             ), tags=(ap['ap_id'],))
         
         self.count_label.config(text=f"{len(aps)} AP(s) found")
+        
+        # Reset sort indicator
+        if not self.sort_column:
+            self.sort_column = "ap_id"
+            self.sort_reverse = False
     
     def _count_open_tickets(self, ap_id: str) -> int:
         """Count open Jira tickets for an AP."""

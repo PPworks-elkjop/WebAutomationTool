@@ -8,6 +8,7 @@ from tkinter import ttk, messagebox
 from ap_support_ui_v3 import APSupportWindowModern
 import sys
 import os
+import threading
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 from custom_notebook import CustomNotebook
 
@@ -113,22 +114,73 @@ class APPanel:
         tk.Label(content, text="Search Results (double-click to open):", font=('Segoe UI', 10, 'bold'),
                 bg="#FFFFFF", fg="#495057").pack(anchor="w", pady=(0, 5))
         
+        # Results treeview frame
         list_frame = tk.Frame(content, bg="#FFFFFF")
         list_frame.pack(fill=tk.BOTH, expand=True, pady=(0, 0))
         
-        scrollbar = tk.Scrollbar(list_frame)
-        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        # Configure treeview style for search results
+        style = ttk.Style()
+        style.configure("SearchResults.Treeview", 
+                       background="#FFFFFF",
+                       foreground="#333333",
+                       fieldbackground="#FFFFFF",
+                       font=("Segoe UI", 10),
+                       rowheight=28)
+        style.configure("SearchResults.Treeview.Heading",
+                       font=("Segoe UI", 11, "bold"),
+                       background="#3D6B9E",
+                       foreground="white",
+                       relief="flat",
+                       padding=8)
+        style.map("SearchResults.Treeview.Heading",
+                 background=[('active', '#2D5B8E')])
+        style.map("SearchResults.Treeview",
+                 background=[('selected', '#007BFF')],
+                 foreground=[('selected', 'white')])
         
-        self.search_results = tk.Listbox(list_frame, yscrollcommand=scrollbar.set,
-                                        font=('Segoe UI', 10), bd=1, relief=tk.SOLID,
-                                        selectmode=tk.SINGLE)
-        self.search_results.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-        scrollbar.config(command=self.search_results.yview)
+        # Scrollbars
+        vsb = ttk.Scrollbar(list_frame, orient="vertical")
+        hsb = ttk.Scrollbar(list_frame, orient="horizontal")
+        
+        # Treeview
+        self.search_results = ttk.Treeview(
+            list_frame,
+            columns=("ap_id", "store_id", "ip_address", "jira_count"),
+            show="headings",
+            yscrollcommand=vsb.set,
+            xscrollcommand=hsb.set,
+            style="SearchResults.Treeview",
+            selectmode="browse"
+        )
+        
+        vsb.config(command=self.search_results.yview)
+        hsb.config(command=self.search_results.xview)
+        
+        # Configure columns with sortable headers (left-aligned, bold)
+        self.search_results.heading("ap_id", text="AP-ID", anchor="w", command=lambda: self._sort_search_results("ap_id"))
+        self.search_results.heading("store_id", text="Store ID", anchor="w", command=lambda: self._sort_search_results("store_id"))
+        self.search_results.heading("ip_address", text="IP", anchor="w", command=lambda: self._sort_search_results("ip_address"))
+        self.search_results.heading("jira_count", text="# Jira", anchor="w", command=lambda: self._sort_search_results("jira_count"))
+        
+        self.search_results.column("ap_id", width=150, anchor="w")
+        self.search_results.column("store_id", width=100, anchor="w")
+        self.search_results.column("ip_address", width=120, anchor="w")
+        self.search_results.column("jira_count", width=80, anchor="w")
+        
+        # Grid layout
+        self.search_results.grid(row=0, column=0, sticky="nsew")
+        vsb.grid(row=0, column=1, sticky="ns")
+        hsb.grid(row=1, column=0, sticky="ew")
+        
+        list_frame.grid_rowconfigure(0, weight=1)
+        list_frame.grid_columnconfigure(0, weight=1)
         
         self.search_results.bind('<Double-Button-1>', lambda e: self._open_selected_ap())
         
-        # Store AP data for results
+        # Store AP data for results and sort state
         self.search_ap_data = []
+        self.search_sort_column = None
+        self.search_sort_reverse = False
     
     def _create_custom_checkbox(self, parent, text, variable):
         """Create a custom styled checkbox with larger size."""
@@ -185,7 +237,9 @@ class APPanel:
             messagebox.showwarning("Search", "Please select at least one search field", parent=self.parent)
             return
         
-        self.search_results.delete(0, tk.END)
+        # Clear existing results
+        for item in self.search_results.get_children():
+            self.search_results.delete(item)
         self.search_ap_data = []
         
         try:
@@ -206,82 +260,174 @@ class APPanel:
                 include_jira = self.search_include_jira.get()
                 
                 if include_jira:
-                    self._log(f"Found {len(results)} APs, fetching Jira data...")
+                    self._log(f"Found {len(results)} APs, fetching Jira data in background...")
                     
-                    # Import Jira integration to fetch fresh data
-                    from jira_integration import JiraIntegration
-                    from jira_db_manager import JiraDBManager
-                    from credentials_manager import CredentialsManager
+                    # Display results immediately without Jira counts
+                    for ap in results:
+                        self.search_results.insert("", "end", values=(
+                            ap['ap_id'],
+                            ap.get('store_id', 'N/A'),
+                            ap.get('ip_address', 'N/A'),
+                            '...'  # Placeholder while loading
+                        ), tags=(ap['ap_id'],))
+                        self.search_ap_data.append(ap)
                     
-                    jira_integration = JiraIntegration(self.db)
-                    jira_db = JiraDBManager(self.db)
-                    credentials = CredentialsManager(self.db).get_credentials('jira')
-                    jira_base_url = credentials.get('url', '').rstrip('/') if credentials else ''
-                else:
-                    self._log(f"Found {len(results)} APs (Jira lookup skipped)")
-                
-                # Display results for each AP
-                for ap in results:
-                    ap_id = ap['ap_id']
-                    jira_indicator = ""
-                    
-                    # Fetch fresh Jira data if requested
-                    if include_jira:
+                    # Fetch Jira data in background thread
+                    def fetch_jira_data():
+                        from jira_integration import JiraIntegration
+                        from jira_db_manager import JiraDBManager
+                        from credentials_manager import CredentialsManager
+                        
+                        jira_integration = JiraIntegration(self.db)
+                        jira_db = JiraDBManager(self.db)
+                        credentials = CredentialsManager(self.db).get_credentials('jira')
+                        jira_base_url = credentials.get('url', '').rstrip('/') if credentials else ''
+                        
+                        jira_counts = {}
+                        
                         try:
                             if jira_integration.is_configured():
-                                # Search Jira for this AP ID
-                                search_term_jira = f"{ap_id}*" if ap_id.isdigit() else ap_id
-                                jql = f'(text ~ "{search_term_jira}" OR summary ~ "{search_term_jira}" OR description ~ "{search_term_jira}" OR comment ~ "{search_term_jira}")'
+                                # Build a single JQL query for all AP IDs
+                                ap_ids = [ap['ap_id'] for ap in results]
                                 
-                                success, result, message = jira_integration.search_issues(jql, max_results=50)
+                                # Create OR conditions for all AP IDs
+                                search_terms = []
+                                for ap_id in ap_ids:
+                                    search_term_jira = f"{ap_id}*" if ap_id.isdigit() else ap_id
+                                    search_terms.append(f'text ~ "{search_term_jira}"')
                                 
-                                if success and result:
-                                    issues = result.get('issues', [])
-                                    # Store/update in database
-                                    for issue in issues:
-                                        jira_db.store_issue(ap_id, issue, jira_base_url)
-                            
-                            # Now get open ticket count from database
-                            all_issues = jira_db.get_issues_for_ap(ap_id)
-                            open_issues = []
-                            for issue in all_issues:
-                                status = issue.get('status', '').strip()
-                                if status.lower() not in ['resolved', 'closed', 'done']:
-                                    open_issues.append(issue)
-                            
-                            jira_count = len(open_issues)
-                            jira_indicator = f" [Jira: {jira_count}]" if jira_count > 0 else ""
+                                # Combine all search terms with OR (limit to reasonable JQL length)
+                                # If too many APs, batch them
+                                batch_size = 50
+                                all_issues = []
+                                
+                                for i in range(0, len(search_terms), batch_size):
+                                    batch_terms = search_terms[i:i+batch_size]
+                                    jql = f'({" OR ".join(batch_terms)})'
+                                    
+                                    success, result, message = jira_integration.search_issues(jql, max_results=1000)
+                                    
+                                    if success and result:
+                                        issues = result.get('issues', [])
+                                        all_issues.extend(issues)
+                                
+                                # Process all issues and match them to APs
+                                for issue in all_issues:
+                                    issue_text = f"{issue.get('key', '')} {issue.get('fields', {}).get('summary', '')} {issue.get('fields', {}).get('description', '')}"
+                                    
+                                    # Find which AP(s) this issue belongs to
+                                    for ap_id in ap_ids:
+                                        if ap_id.lower() in issue_text.lower():
+                                            jira_db.store_issue(ap_id, issue, jira_base_url)
+                                
+                                # Count open issues for each AP
+                                for ap_id in ap_ids:
+                                    all_issues_for_ap = jira_db.get_issues_for_ap(ap_id)
+                                    open_issues = [i for i in all_issues_for_ap if i.get('status', '').strip().lower() not in ['resolved', 'closed', 'done']]
+                                    jira_counts[ap_id] = len(open_issues)
                             
                         except Exception as e:
-                            jira_indicator = ""
-                            self._log(f"Error getting Jira for AP {ap_id}: {str(e)}", "error")
+                            self._log(f"Error fetching Jira data: {str(e)}", "error")
+                            # Set 0 for all APs on error
+                            for ap in results:
+                                jira_counts[ap['ap_id']] = 0
+                        
+                        # Update UI in main thread
+                        self.parent.after(0, lambda: self._update_jira_counts(jira_counts))
                     
-                    display_text = f"{ap['ap_id']} - Store: {ap.get('store_id', 'N/A')} - {ap.get('ip_address', 'N/A')}{jira_indicator}"
-                    self.search_results.insert(tk.END, display_text)
-                    self.search_ap_data.append(ap)
-                
-                if include_jira:
-                    self._log(f"Search complete with Jira data for {len(results)} APs")
+                    threading.Thread(target=fetch_jira_data, daemon=True).start()
                 else:
-                    self._log(f"Search complete for {len(results)} APs")
+                    self._log(f"Found {len(results)} APs (Jira lookup skipped)")
+                    
+                    # Display results without Jira counts
+                    for ap in results:
+                        self.search_results.insert("", "end", values=(
+                            ap['ap_id'],
+                            ap.get('store_id', 'N/A'),
+                            ap.get('ip_address', 'N/A'),
+                            '0'
+                        ), tags=(ap['ap_id'],))
+                        self.search_ap_data.append(ap)
             else:
-                self.search_results.insert(tk.END, "No results found")
+                self.search_results.insert("", "end", values=("No results found", "", "", ""))
                 self._log(f"No APs found for '{search_term}'")
                 
         except Exception as e:
             messagebox.showerror("Search Error", f"Failed to search: {e}", parent=self.parent)
             self._log(f"Search error: {e}", "error")
     
+    def _update_jira_counts(self, jira_counts):
+        """Update Jira counts in search results after background fetch."""
+        for item in self.search_results.get_children():
+            tags = self.search_results.item(item, "tags")
+            if tags:
+                ap_id = tags[0]
+                if ap_id in jira_counts:
+                    values = list(self.search_results.item(item, "values"))
+                    values[3] = str(jira_counts[ap_id])
+                    self.search_results.item(item, values=values)
+        
+        self._log(f"Jira data loaded for {len(jira_counts)} APs")
+    
+    def _sort_search_results(self, col):
+        """Sort search results by column."""
+        # Toggle sort direction if same column, else start with ascending
+        if self.search_sort_column == col:
+            self.search_sort_reverse = not self.search_sort_reverse
+        else:
+            self.search_sort_reverse = False
+        self.search_sort_column = col
+        
+        # Get all items
+        items = [(self.search_results.set(item, col), item) for item in self.search_results.get_children('')]
+        
+        # Sort items
+        try:
+            # Try numeric sort for jira count and store_id columns
+            if col == "jira_count":
+                items.sort(key=lambda x: int(x[0]) if x[0].isdigit() else 0, reverse=self.search_sort_reverse)
+            elif col == "store_id":
+                items.sort(key=lambda x: int(x[0]) if x[0].isdigit() else 0, reverse=self.search_sort_reverse)
+            else:
+                items.sort(key=lambda x: str(x[0]).lower(), reverse=self.search_sort_reverse)
+        except:
+            items.sort(key=lambda x: str(x[0]).lower(), reverse=self.search_sort_reverse)
+        
+        # Rearrange items in sorted order
+        for index, (val, item) in enumerate(items):
+            self.search_results.move(item, '', index)
+        
+        # Update column headings to show sort direction
+        for column in self.search_results['columns']:
+            heading_text = {
+                'ap_id': 'AP-ID',
+                'store_id': 'Store ID',
+                'ip_address': 'IP',
+                'jira_count': '# Jira'
+            }.get(column, column)
+            
+            if column == col:
+                arrow = ' ▼' if self.search_sort_reverse else ' ▲'
+                self.search_results.heading(column, text=heading_text + arrow)
+            else:
+                self.search_results.heading(column, text=heading_text)
+    
     def _open_selected_ap(self):
         """Open the selected AP from search results."""
-        selection = self.search_results.curselection()
+        selection = self.search_results.selection()
         if not selection:
             messagebox.showwarning("No Selection", "Please select an AP to open", parent=self.parent)
             return
         
-        index = selection[0]
-        if index < len(self.search_ap_data):
-            ap_data = self.search_ap_data[index]
+        item = selection[0]
+        ap_id = self.search_results.item(item, "tags")[0] if self.search_results.item(item, "tags") else None
+        
+        if not ap_id:
+            return
+        
+        # Find AP data by ap_id
+        ap_data = next((ap for ap in self.search_ap_data if ap['ap_id'] == ap_id), None)
+        if ap_data:
             self.add_ap_tab(ap_data)
     
     def add_ap_tab(self, ap_data):

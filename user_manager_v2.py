@@ -114,14 +114,15 @@ class UserManager:
         return self.db.get_user(username)
     
     def add_user(self, full_name: str, username: str, password: str, role: str,
-                created_by: str = None) -> tuple:
+                email: str = None, is_active: bool = True, created_by: str = None) -> tuple:
         """Add a new user with audit logging."""
-        return self.db.add_user(username, full_name, password, role, created_by)
+        return self.db.add_user(username, full_name, password, role, email, created_by, is_active)
     
     def update_user(self, username: str, full_name: str = None, password: str = None, 
-                   role: str = None, updated_by: str = None) -> tuple:
+                   role: str = None, email: str = None, is_active: bool = None, 
+                   updated_by: str = None) -> tuple:
         """Update user information with audit logging."""
-        return self.db.update_user(username, full_name, password, role, updated_by)
+        return self.db.update_user(username, full_name, password, role, email, is_active, updated_by)
     
     def delete_user(self, username: str, deleted_by: str = None) -> tuple:
         """Delete a user with audit logging."""

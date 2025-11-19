@@ -279,6 +279,7 @@ class DatabaseManager:
                     full_name TEXT NOT NULL,
                     password TEXT NOT NULL,  -- Encrypted
                     role TEXT NOT NULL,  -- Admin or User
+                    email TEXT,  -- User email address
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     created_by TEXT,  -- Username who created this user
                     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -287,6 +288,13 @@ class DatabaseManager:
                     is_active BOOLEAN DEFAULT 1
                 )
             ''')
+            
+            # Add email column if it doesn't exist (migration)
+            try:
+                cursor.execute("SELECT email FROM users LIMIT 1")
+            except:
+                cursor.execute("ALTER TABLE users ADD COLUMN email TEXT")
+            
             
             # User audit log - tracks user management actions
             cursor.execute('''
@@ -739,7 +747,7 @@ class DatabaseManager:
     # ==================== USER MANAGEMENT METHODS ====================
     
     def add_user(self, username: str, full_name: str, password: str, role: str, 
-                 created_by: str = None) -> Tuple[bool, str]:
+                 email: str = None, created_by: str = None, is_active: bool = True) -> Tuple[bool, str]:
         """Add a new user with audit logging."""
         try:
             with self._get_connection() as conn:
@@ -759,13 +767,13 @@ class DatabaseManager:
                 
                 # Insert user
                 cursor.execute('''
-                    INSERT INTO users (username, full_name, password, role, created_by, updated_by)
-                    VALUES (?, ?, ?, ?, ?, ?)
-                ''', (username, full_name, encrypted_password, role, created_by, created_by))
+                    INSERT INTO users (username, full_name, password, role, email, created_by, updated_by, is_active)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                ''', (username, full_name, encrypted_password, role, email, created_by, created_by, 1 if is_active else 0))
                 
                 # Log the action
                 self._log_user_audit(cursor, created_by or 'system', 'create_user', username, 
-                                    f"Created {role} user")
+                                    f"Created {role} user" + (f" with email {email}" if email else ""))
                 
                 conn.commit()
                 return True, f"User '{username}' created successfully"
@@ -773,7 +781,8 @@ class DatabaseManager:
             return False, f"Error creating user: {e}"
     
     def update_user(self, username: str, full_name: str = None, password: str = None, 
-                    role: str = None, updated_by: str = None) -> Tuple[bool, str]:
+                    role: str = None, email: str = None, is_active: bool = None, 
+                    updated_by: str = None) -> Tuple[bool, str]:
         """Update user information with audit logging."""
         try:
             with self._get_connection() as conn:
@@ -796,6 +805,16 @@ class DatabaseManager:
                     updates.append('full_name = ?')
                     params.append(full_name)
                     changes.append(f"name: {user_dict['full_name']} -> {full_name}")
+                
+                if email is not None and email != user_dict.get('email'):
+                    updates.append('email = ?')
+                    params.append(email)
+                    changes.append(f"email: {user_dict.get('email', 'None')} -> {email}")
+                
+                if is_active is not None and is_active != bool(user_dict.get('is_active', 1)):
+                    updates.append('is_active = ?')
+                    params.append(1 if is_active else 0)
+                    changes.append(f"status: {'active' if user_dict.get('is_active', 1) else 'inactive'} -> {'active' if is_active else 'inactive'}")
                 
                 if password is not None:
                     encrypted_password = self._encrypt(password)
