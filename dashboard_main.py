@@ -98,6 +98,7 @@ class DashboardMain:
             ("Post System Notification", self._post_notification),
             None,
             ("Manage AP Credentials", self._open_credentials_manager),
+            ("Manage Vusion API Keys", self._open_vusion_config),
             ("Manage Users", self._open_user_management),
             ("Change Password", self._change_password),
             None,
@@ -437,6 +438,16 @@ class DashboardMain:
             self.activity_log.log_message("Admin", "Opened Credentials Manager", "info")
         except Exception as e:
             messagebox.showerror("Error", f"Failed to open Credentials Manager: {e}")
+    
+    def _open_vusion_config(self):
+        """Open Vusion API configuration dialog."""
+        try:
+            from vusion_config_dialog import VusionAPIConfigDialog
+            dialog = VusionAPIConfigDialog(self.root)
+            dialog.show()
+            self.activity_log.log_message("Admin", "Opened Vusion API Configuration", "info")
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to open Vusion API configuration:\n{str(e)}")
     
     def _open_user_management(self):
         """Open user management window (modern style)."""

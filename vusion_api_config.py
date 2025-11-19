@@ -1,0 +1,342 @@
+"""
+Vusion API Configuration Manager
+Handles multiple API keys and endpoints across different countries and services.
+"""
+
+import json
+from pathlib import Path
+from typing import Dict, Optional, List
+from cryptography.fernet import Fernet
+import base64
+import hashlib
+
+
+class VusionAPIConfig:
+    """Manages Vusion API configurations with encrypted API keys."""
+    
+    # Supported countries
+    COUNTRIES = ['NO', 'SE', 'FI', 'DK', 'IS']
+    
+    # API Services
+    SERVICES = {
+        'vusion_pro': {
+            'name': 'Vusion Manager PRO',
+            'base_url': 'https://api-eu.vusion.io/vusion-pro/v1',
+            'endpoints': {
+                'stores': '/stores/{storeId}',
+                'labels': '/stores/{storeId}/labels',
+                'gateways': '/stores/{storeId}/gateways',
+                'templates': '/stores/{storeId}/templates',
+            }
+        },
+        'vusion_cloud': {
+            'name': 'Vusion Cloud',
+            'base_url': 'https://api-eu.vusion.io/vusion-cloud/v1',
+            'endpoints': {
+                'devices': '/devices',
+                'templates': '/templates',
+            }
+        },
+        'vusion_retail': {
+            'name': 'Vusion Retail',
+            'base_url': 'https://api-eu.vusion.io/vusion-retail/v1',
+            'endpoints': {
+                'products': '/products',
+                'prices': '/prices',
+            }
+        }
+    }
+    
+    # Store ID patterns by country and chain
+    STORE_PATTERNS = {
+        'NO': {
+            'elkjop': 'elkjop_no.{store_number}',
+            'lefdal': 'lefdal_no.{store_number}',
+        },
+        'SE': {
+            'elgiganten': 'elgiganten_se.{store_number}',
+        },
+        'FI': {
+            'gigantti': 'gigantti_fi.{store_number}',
+        },
+        'DK': {
+            'elgiganten': 'elgiganten_dk.{store_number}',
+        },
+        'IS': {
+            'elko': 'elko_is.{store_number}',
+        }
+    }
+    
+    def __init__(self, config_file: str = None):
+        if config_file is None:
+            config_file = Path.home() / ".vera_vusion_config.json"
+        self.config_file = Path(config_file)
+        self.key_file = Path.home() / ".vera_vusion_key"
+        self._cipher = self._get_cipher()
+        self._config = self._load_config()
+    
+    def _get_cipher(self):
+        """Get or create encryption cipher for API keys."""
+        if self.key_file.exists():
+            with open(self.key_file, 'rb') as f:
+                key = f.read()
+        else:
+            key = Fernet.generate_key()
+            with open(self.key_file, 'wb') as f:
+                f.write(key)
+            try:
+                import os
+                os.chmod(self.key_file, 0o600)
+            except:
+                pass
+        return Fernet(key)
+    
+    def _encrypt(self, value: str) -> str:
+        """Encrypt an API key."""
+        if not value:
+            return ''
+        return self._cipher.encrypt(value.encode()).decode()
+    
+    def _decrypt(self, encrypted: str) -> str:
+        """Decrypt an API key."""
+        if not encrypted:
+            return ''
+        try:
+            return self._cipher.decrypt(encrypted.encode()).decode()
+        except Exception:
+            return encrypted
+    
+    def _load_config(self) -> Dict:
+        """Load configuration from file."""
+        if self.config_file.exists():
+            with open(self.config_file, 'r') as f:
+                return json.load(f)
+        else:
+            # Create default structure
+            default_config = {
+                'api_keys': {},  # {country: {service: encrypted_key}}
+                'metadata': {
+                    'created': None,
+                    'last_updated': None,
+                }
+            }
+            self._save_config(default_config)
+            return default_config
+    
+    def _save_config(self, config: Dict = None):
+        """Save configuration to file."""
+        if config is None:
+            config = self._config
+        
+        from datetime import datetime
+        if not config['metadata']['created']:
+            config['metadata']['created'] = datetime.now().isoformat()
+        config['metadata']['last_updated'] = datetime.now().isoformat()
+        
+        with open(self.config_file, 'w') as f:
+            json.dump(config, f, indent=2)
+    
+    def set_api_key(self, country: str, service: str, api_key: str) -> bool:
+        """
+        Set API key for a country and service.
+        
+        Args:
+            country: Country code (NO, SE, FI, DK, IS)
+            service: Service name (vusion_pro, vusion_cloud, vusion_retail)
+            api_key: The API subscription key
+        
+        Returns:
+            True if successful
+        """
+        if country not in self.COUNTRIES:
+            raise ValueError(f"Invalid country: {country}. Must be one of {self.COUNTRIES}")
+        
+        if service not in self.SERVICES:
+            raise ValueError(f"Invalid service: {service}. Must be one of {list(self.SERVICES.keys())}")
+        
+        # Initialize country dict if needed
+        if country not in self._config['api_keys']:
+            self._config['api_keys'][country] = {}
+        
+        # Encrypt and store
+        encrypted_key = self._encrypt(api_key)
+        self._config['api_keys'][country][service] = encrypted_key
+        
+        self._save_config()
+        return True
+    
+    def get_api_key(self, country: str, service: str) -> Optional[str]:
+        """
+        Get decrypted API key for a country and service.
+        
+        Args:
+            country: Country code
+            service: Service name
+        
+        Returns:
+            Decrypted API key or None if not found
+        """
+        if country not in self._config['api_keys']:
+            return None
+        
+        if service not in self._config['api_keys'][country]:
+            return None
+        
+        encrypted_key = self._config['api_keys'][country][service]
+        return self._decrypt(encrypted_key)
+    
+    def get_all_keys(self) -> Dict[str, Dict[str, str]]:
+        """
+        Get all API keys (decrypted) organized by country and service.
+        
+        Returns:
+            Dict of {country: {service: api_key}}
+        """
+        result = {}
+        for country in self._config['api_keys']:
+            result[country] = {}
+            for service in self._config['api_keys'][country]:
+                result[country][service] = self.get_api_key(country, service)
+        return result
+    
+    def delete_api_key(self, country: str, service: str) -> bool:
+        """Delete an API key."""
+        if country in self._config['api_keys']:
+            if service in self._config['api_keys'][country]:
+                del self._config['api_keys'][country][service]
+                self._save_config()
+                return True
+        return False
+    
+    def get_endpoint_url(self, service: str, endpoint: str, **kwargs) -> str:
+        """
+        Build full endpoint URL with parameters.
+        
+        Args:
+            service: Service name (e.g., 'vusion_pro')
+            endpoint: Endpoint name (e.g., 'stores')
+            **kwargs: URL parameters (e.g., storeId='gigantti_fi.4010')
+        
+        Returns:
+            Full URL string
+        
+        Example:
+            url = config.get_endpoint_url('vusion_pro', 'stores', storeId='gigantti_fi.4010')
+        """
+        if service not in self.SERVICES:
+            raise ValueError(f"Unknown service: {service}")
+        
+        service_config = self.SERVICES[service]
+        
+        if endpoint not in service_config['endpoints']:
+            raise ValueError(f"Unknown endpoint: {endpoint} for service {service}")
+        
+        base_url = service_config['base_url']
+        endpoint_path = service_config['endpoints'][endpoint]
+        
+        # Replace URL parameters
+        full_path = endpoint_path.format(**kwargs)
+        
+        return f"{base_url}{full_path}"
+    
+    def build_store_id(self, country: str, chain: str, store_number: str) -> str:
+        """
+        Build store ID from country, chain, and store number.
+        
+        Args:
+            country: Country code (NO, SE, FI, DK, IS)
+            chain: Chain name (elkjop, elgiganten, gigantti, etc.)
+            store_number: Store number (e.g., '4010')
+        
+        Returns:
+            Store ID string (e.g., 'gigantti_fi.4010')
+        
+        Example:
+            store_id = config.build_store_id('FI', 'gigantti', '4010')
+            # Returns: 'gigantti_fi.4010'
+        """
+        if country not in self.STORE_PATTERNS:
+            raise ValueError(f"Unknown country: {country}")
+        
+        if chain not in self.STORE_PATTERNS[country]:
+            raise ValueError(f"Unknown chain: {chain} for country {country}")
+        
+        pattern = self.STORE_PATTERNS[country][chain]
+        return pattern.format(store_number=store_number)
+    
+    def get_request_headers(self, country: str, service: str) -> Dict[str, str]:
+        """
+        Get request headers with API key for a specific country and service.
+        
+        Args:
+            country: Country code
+            service: Service name
+        
+        Returns:
+            Dict of HTTP headers
+        """
+        api_key = self.get_api_key(country, service)
+        
+        if not api_key:
+            raise ValueError(f"No API key configured for {country}/{service}")
+        
+        return {
+            'Cache-Control': 'no-cache',
+            'Ocp-Apim-Subscription-Key': api_key,
+            'Content-Type': 'application/json',
+        }
+    
+    def list_configured_keys(self) -> List[Dict[str, str]]:
+        """
+        List all configured API keys (without showing the actual keys).
+        
+        Returns:
+            List of dicts with country, service, and status
+        """
+        result = []
+        for country in self._config['api_keys']:
+            for service in self._config['api_keys'][country]:
+                result.append({
+                    'country': country,
+                    'service': service,
+                    'service_name': self.SERVICES[service]['name'],
+                    'configured': True
+                })
+        return result
+
+
+# Convenience function for quick access
+_global_config = None
+
+def get_vusion_config() -> VusionAPIConfig:
+    """Get or create global Vusion API configuration instance."""
+    global _global_config
+    if _global_config is None:
+        _global_config = VusionAPIConfig()
+    return _global_config
+
+
+if __name__ == '__main__':
+    # Example usage
+    config = VusionAPIConfig()
+    
+    # Set API keys
+    config.set_api_key('FI', 'vusion_pro', 'your-api-key-here')
+    config.set_api_key('NO', 'vusion_pro', 'norway-api-key-here')
+    
+    # Build store ID
+    store_id = config.build_store_id('FI', 'gigantti', '4010')
+    print(f"Store ID: {store_id}")
+    
+    # Get full endpoint URL
+    url = config.get_endpoint_url('vusion_pro', 'stores', storeId=store_id)
+    print(f"URL: {url}")
+    
+    # Get headers
+    headers = config.get_request_headers('FI', 'vusion_pro')
+    print(f"Headers: {headers}")
+    
+    # List configured keys
+    print("\nConfigured API keys:")
+    for key_info in config.list_configured_keys():
+        print(f"  {key_info['country']} - {key_info['service_name']}")
