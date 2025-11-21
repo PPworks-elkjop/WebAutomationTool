@@ -423,30 +423,12 @@ class ModernCredentialManager:
                     print(f"[SEARCH] No results found for '{query}'")
                     self._refresh_list([])
                     self.status_label.config(text=f"Search: '{query}' - No results found")
-                    
-                    # Log search action
-                    if self.db_manager and self.current_user:
-                        self._log_action(
-                            'search',
-                            f"Searched AP credentials: '{query}' - No results",
-                            None,
-                            True
-                        )
             except Exception as e:
                 import traceback
                 error_details = traceback.format_exc()
                 print(f"[SEARCH ERROR] Exception: {e}")
                 print(f"[SEARCH ERROR] Traceback:\n{error_details}")
                 self.status_label.config(text=f"Search error: {str(e)}")
-                
-                # Log search error
-                if self.db_manager and self.current_user:
-                    self._log_action(
-                        'search',
-                        f"Search error: '{query}' - {str(e)}",
-                        None,
-                        False
-                    )
         else:
             print(f"[SEARCH] Empty query, showing all results")
             self._refresh_list()
