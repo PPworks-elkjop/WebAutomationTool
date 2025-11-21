@@ -1023,13 +1023,13 @@ class PasswordDialog:
 
 
 class AuditLogViewer:
-    """Viewer for audit logs."""
+    """Viewer for audit logs and user activity tracking."""
     
     def __init__(self, parent, user_manager):
         self.user_manager = user_manager
         
         self.window = tk.Toplevel(parent)
-        self.window.title("User Audit Log")
+        self.window.title("User Audit Log & Activity Tracking")
         self.window.geometry("1200x700")
         self.window.configure(bg="#F5F5F5")
         self.window.transient(parent)
@@ -1038,7 +1038,7 @@ class AuditLogViewer:
         self._refresh_log()
     
     def _build_ui(self):
-        """Build the audit log viewer UI."""
+        """Build the audit log viewer UI with tabs."""
         # Header
         header = tk.Frame(self.window, bg="#2C3E50", height=60)
         header.pack(fill="x")
@@ -1046,31 +1046,51 @@ class AuditLogViewer:
         
         tk.Label(
             header,
-            text="📋 User Audit Log",
+            text="📋 User Audit Log & Activity Tracking",
             font=("Segoe UI", 16, "bold"),
             bg="#2C3E50",
             fg="white"
         ).pack(side="left", padx=20, pady=15)
         
-        # Content
+        # Content with tabs
         content = tk.Frame(self.window, bg="#F5F5F5")
         content.pack(fill="both", expand=True, padx=20, pady=20)
         
+        # Create notebook for tabs
+        self.notebook = ttk.Notebook(content)
+        self.notebook.pack(fill="both", expand=True)
+        
+        # Audit Log tab
+        self.audit_tab = tk.Frame(self.notebook, bg="#F5F5F5")
+        self.notebook.add(self.audit_tab, text="Audit Log")
+        
+        # Activity Tracking tab
+        self.activity_tab = tk.Frame(self.notebook, bg="#F5F5F5")
+        self.notebook.add(self.activity_tab, text="Activity Tracking")
+        
+        # Build individual tab contents
+        self._build_audit_tab()
+        self._build_activity_tab()
+    
+    def _build_audit_tab(self):
+        """Build the audit log tab content."""
+        content = self.audit_tab
+        
         # Toolbar
         toolbar = tk.Frame(content, bg="#F5F5F5")
-        toolbar.pack(fill="x", pady=(0, 10))
+        toolbar.pack(fill="x", pady=(10, 10))
         
         tk.Label(toolbar, text="Filter by user:", font=("Segoe UI", 10),
                 bg="#F5F5F5", fg="#495057").pack(side="left", padx=(0, 5))
-        self.filter_var = tk.StringVar()
-        filter_entry = tk.Entry(toolbar, textvariable=self.filter_var, width=20,
+        self.audit_filter_var = tk.StringVar()
+        filter_entry = tk.Entry(toolbar, textvariable=self.audit_filter_var, width=20,
                                font=("Segoe UI", 10), bd=1, relief="solid")
         filter_entry.pack(side="left", padx=(0, 5))
         
         filter_btn = tk.Button(
             toolbar,
             text="Filter",
-            command=self._refresh_log,
+            command=self._refresh_audit_log,
             bg="#007BFF",
             fg="white",
             font=("Segoe UI", 10, "bold"),
@@ -1084,7 +1104,7 @@ class AuditLogViewer:
         clear_btn = tk.Button(
             toolbar,
             text="Clear",
-            command=lambda: [self.filter_var.set(''), self._refresh_log()],
+            command=lambda: [self.audit_filter_var.set(''), self._refresh_audit_log()],
             bg="#6C757D",
             fg="white",
             font=("Segoe UI", 10, "bold"),
@@ -1098,7 +1118,7 @@ class AuditLogViewer:
         refresh_btn = tk.Button(
             toolbar,
             text="🔄 Refresh",
-            command=self._refresh_log,
+            command=self._refresh_audit_log,
             bg="#6C757D",
             fg="white",
             font=("Segoe UI", 10, "bold"),
@@ -1117,29 +1137,125 @@ class AuditLogViewer:
         scrollbar.pack(side="right", fill="y")
         
         columns = ("Timestamp", "Actor", "Action", "Target", "Details")
-        self.tree = ttk.Treeview(list_frame, columns=columns, show="headings",
+        self.audit_tree = ttk.Treeview(list_frame, columns=columns, show="headings",
                                 yscrollcommand=scrollbar.set)
-        scrollbar.config(command=self.tree.yview)
+        scrollbar.config(command=self.audit_tree.yview)
         
         for col in columns:
-            self.tree.heading(col, text=col)
+            self.audit_tree.heading(col, text=col)
         
-        self.tree.column("Timestamp", width=180)
-        self.tree.column("Actor", width=120)
-        self.tree.column("Action", width=150)
-        self.tree.column("Target", width=120)
-        self.tree.column("Details", width=500)
+        self.audit_tree.column("Timestamp", width=180)
+        self.audit_tree.column("Actor", width=120)
+        self.audit_tree.column("Action", width=150)
+        self.audit_tree.column("Target", width=120)
+        self.audit_tree.column("Details", width=500)
         
-        self.tree.pack(fill="both", expand=True, padx=2, pady=2)
+        self.audit_tree.pack(fill="both", expand=True, padx=2, pady=2)
+    
+    def _build_activity_tab(self):
+        """Build the activity tracking tab content."""
+        content = self.activity_tab
+        
+        # Toolbar
+        toolbar = tk.Frame(content, bg="#F5F5F5")
+        toolbar.pack(fill="x", pady=(10, 10))
+        
+        tk.Label(toolbar, text="Filter by user:", font=("Segoe UI", 10),
+                bg="#F5F5F5", fg="#495057").pack(side="left", padx=(0, 5))
+        self.activity_user_filter = tk.StringVar()
+        user_entry = tk.Entry(toolbar, textvariable=self.activity_user_filter, width=20,
+                             font=("Segoe UI", 10), bd=1, relief="solid")
+        user_entry.pack(side="left", padx=(0, 5))
+        
+        tk.Label(toolbar, text="Activity type:", font=("Segoe UI", 10),
+                bg="#F5F5F5", fg="#495057").pack(side="left", padx=(10, 5))
+        self.activity_type_filter = tk.StringVar()
+        type_combo = ttk.Combobox(toolbar, textvariable=self.activity_type_filter, width=18,
+                                 font=("Segoe UI", 10), state="readonly")
+        type_combo['values'] = ("All", "login", "logout", "ap_connect", "provision", "config_change", "view_credentials")
+        type_combo.current(0)
+        type_combo.pack(side="left", padx=(0, 5))
+        
+        filter_btn = tk.Button(
+            toolbar,
+            text="Filter",
+            command=self._refresh_activity_log,
+            bg="#007BFF",
+            fg="white",
+            font=("Segoe UI", 10, "bold"),
+            relief="flat",
+            cursor="hand2",
+            padx=15,
+            pady=5
+        )
+        filter_btn.pack(side="left", padx=(5, 5))
+        
+        clear_btn = tk.Button(
+            toolbar,
+            text="Clear",
+            command=lambda: [self.activity_user_filter.set(''), self.activity_type_filter.set('All'), self._refresh_activity_log()],
+            bg="#6C757D",
+            fg="white",
+            font=("Segoe UI", 10, "bold"),
+            relief="flat",
+            cursor="hand2",
+            padx=15,
+            pady=5
+        )
+        clear_btn.pack(side="left", padx=(0, 5))
+        
+        refresh_btn = tk.Button(
+            toolbar,
+            text="🔄 Refresh",
+            command=self._refresh_activity_log,
+            bg="#6C757D",
+            fg="white",
+            font=("Segoe UI", 10, "bold"),
+            relief="flat",
+            cursor="hand2",
+            padx=15,
+            pady=5
+        )
+        refresh_btn.pack(side="left")
+        
+        # Activity log tree
+        list_frame = tk.Frame(content, bg="white", relief="solid", bd=1)
+        list_frame.pack(fill="both", expand=True)
+        
+        scrollbar = ttk.Scrollbar(list_frame)
+        scrollbar.pack(side="right", fill="y")
+        
+        columns = ("Timestamp", "Username", "Activity Type", "Description", "AP ID", "Success", "Details")
+        self.activity_tree = ttk.Treeview(list_frame, columns=columns, show="headings",
+                                         yscrollcommand=scrollbar.set)
+        scrollbar.config(command=self.activity_tree.yview)
+        
+        for col in columns:
+            self.activity_tree.heading(col, text=col)
+        
+        self.activity_tree.column("Timestamp", width=180)
+        self.activity_tree.column("Username", width=120)
+        self.activity_tree.column("Activity Type", width=130)
+        self.activity_tree.column("Description", width=250)
+        self.activity_tree.column("AP ID", width=100)
+        self.activity_tree.column("Success", width=70)
+        self.activity_tree.column("Details", width=200)
+        
+        self.activity_tree.pack(fill="both", expand=True, padx=2, pady=2)
     
     def _refresh_log(self):
-        """Refresh the audit log."""
+        """Refresh both audit log and activity log."""
+        self._refresh_audit_log()
+        self._refresh_activity_log()
+    
+    def _refresh_audit_log(self):
+        """Refresh the audit log tab."""
         # Clear existing items
-        for item in self.tree.get_children():
-            self.tree.delete(item)
+        for item in self.audit_tree.get_children():
+            self.audit_tree.delete(item)
         
         # Get filtered logs
-        target = self.filter_var.get().strip() or None
+        target = self.audit_filter_var.get().strip() or None
         logs = self.user_manager.get_user_audit_log(target_username=target, limit=500)
         
         # Add logs
@@ -1151,7 +1267,40 @@ class AuditLogViewer:
                 log.get('target_username', ''),
                 log.get('details', '')
             )
-            self.tree.insert('', 'end', values=values)
+            self.audit_tree.insert('', 'end', values=values)
+    
+    def _refresh_activity_log(self):
+        """Refresh the activity tracking tab."""
+        # Clear existing items
+        for item in self.activity_tree.get_children():
+            self.activity_tree.delete(item)
+        
+        # Get filter values
+        username = self.activity_user_filter.get().strip() or None
+        activity_type = self.activity_type_filter.get()
+        if activity_type == "All":
+            activity_type = None
+        
+        # Get filtered activity logs
+        logs = self.user_manager.db_manager.get_user_activity_log(
+            username=username,
+            activity_type=activity_type,
+            limit=500
+        )
+        
+        # Add logs
+        for log in logs:
+            success_text = "✓" if log.get('success', True) else "✗"
+            values = (
+                log.get('timestamp', '')[:19],
+                log.get('username', ''),
+                log.get('activity_type', ''),
+                log.get('description', ''),
+                log.get('ap_id', '') or '',
+                success_text,
+                log.get('details', '') or ''
+            )
+            self.activity_tree.insert('', 'end', values=values)
 
 
 def open_user_manager(current_user, parent=None, db_manager=None):
