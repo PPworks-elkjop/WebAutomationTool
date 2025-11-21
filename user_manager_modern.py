@@ -1313,11 +1313,15 @@ class AuditLogViewer:
             activity_type = None
         
         # Get filtered activity logs
-        logs = self.user_manager.db.get_user_activity_log(
-            username=username,
-            activity_type=activity_type,
-            limit=500
-        )
+        try:
+            logs = self.user_manager.db.get_user_activity_log(
+                username=username,
+                activity_type=activity_type,
+                limit=500
+            )
+        except AttributeError as e:
+            messagebox.showerror("Error", f"Failed to get activity log: {str(e)}\nuser_manager type: {type(self.user_manager)}\nhas db attr: {hasattr(self.user_manager, 'db')}")
+            return
         
         # Add logs
         for log in logs:
