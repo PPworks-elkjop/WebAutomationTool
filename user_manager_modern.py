@@ -1400,24 +1400,14 @@ class AuditLogViewer:
         """Refresh the audit log tab."""
         try:
             actor = self.audit_filter_var.get().strip() or None
-            print(f"=== AUDIT LOG FILTER CLICKED ===")
-            print(f"Filter value: '{self.audit_filter_var.get()}'")
-            print(f"Actor (after processing): {actor}")
             
             # Clear existing items
-            item_count = len(self.audit_tree.get_children())
-            print(f"Clearing {item_count} existing items")
             for item in self.audit_tree.get_children():
                 self.audit_tree.delete(item)
             
             # Get filtered logs - filter by actor (who performed the action)
-            print(f"Calling get_user_audit_log with actor_username={actor}")
             logs = self.user_manager.get_user_audit_log(actor_username=actor, limit=500)
-            print(f"Got {len(logs)} audit log entries")
         except Exception as e:
-            print(f"ERROR in _refresh_audit_log: {e}")
-            import traceback
-            traceback.print_exc()
             messagebox.showerror("Error", f"Audit log refresh error: {e}")
             return
         
@@ -1435,48 +1425,28 @@ class AuditLogViewer:
     def _refresh_activity_log(self):
         """Refresh the activity tracking tab."""
         try:
-            print(f"=== ACTIVITY LOG FILTER CLICKED ===")
-            print(f"StringVar object: {self.activity_user_filter}")
-            print(f"Raw .get() value: '{self.activity_user_filter.get()}'")
-            print(f"Type: {type(self.activity_user_filter.get())}")
-            
-            # Get filter values - using correct StringVar names
+            # Get filter values
             username = self.activity_user_filter.get().strip() or None
             activity_type = self.activity_type_filter.get().strip()
-            
-            print(f"Username filter: '{self.activity_user_filter.get()}'")
-            print(f"Activity type filter: '{activity_type}'")
             
             if activity_type == "All" or not activity_type:
                 activity_type = None
             
-            print(f"Username (after processing): {username}")
-            print(f"Activity type (after processing): {activity_type}")
-            
             # Clear existing items
-            item_count = len(self.activity_tree.get_children())
-            print(f"Clearing {item_count} existing items")
             for item in self.activity_tree.get_children():
                 self.activity_tree.delete(item)
             
             # Get filtered activity logs
-            print(f"Calling get_user_activity_log with username={username}, activity_type={activity_type}")
             logs = self.db_manager.get_user_activity_log(
                 username=username,
                 activity_type=activity_type,
                 limit=500
             )
-            print(f"Got {len(logs)} activity log entries")
         except Exception as e:
-            print(f"ERROR in _refresh_activity_log: {e}")
-            import traceback
-            traceback.print_exc()
             messagebox.showerror("Error", f"Activity log refresh error: {e}")
             return
         
         # Add logs
-        print(f"Adding {len(logs)} logs to tree...")
-        items_added = 0
         for log in logs:
             success_text = "✓" if log.get('success', True) else "✗"
             values = (
@@ -1489,9 +1459,6 @@ class AuditLogViewer:
                 log.get('details', '') or ''
             )
             self.activity_tree.insert('', 'end', values=values)
-            items_added += 1
-        print(f"Successfully added {items_added} items to activity tree")
-        print(f"Tree now has {len(self.activity_tree.get_children())} total items")
 
 
 def open_user_manager(current_user, parent=None, db_manager=None):

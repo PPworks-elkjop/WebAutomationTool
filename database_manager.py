@@ -1138,7 +1138,6 @@ class DatabaseManager:
     def get_user_activity_log(self, username: str = None, activity_type: str = None,
                              limit: int = 100) -> List[Dict]:
         """Get user activity log, optionally filtered by username or activity type."""
-        print(f"[DB] get_user_activity_log called with username={username}, activity_type={activity_type}, limit={limit}")
         with self._get_connection() as conn:
             cursor = conn.cursor()
             
@@ -1148,22 +1147,16 @@ class DatabaseManager:
             if username:
                 query += ' AND username = ?'
                 params.append(username)
-                print(f"[DB] Added username filter: {username}")
             
             if activity_type:
                 query += ' AND activity_type = ?'
                 params.append(activity_type)
-                print(f"[DB] Added activity_type filter: {activity_type}")
             
             query += ' ORDER BY timestamp DESC LIMIT ?'
             params.append(limit)
             
-            print(f"[DB] Final query: {query}")
-            print(f"[DB] Parameters: {params}")
             cursor.execute(query, params)
-            results = [dict(row) for row in cursor.fetchall()]
-            print(f"[DB] Query returned {len(results)} results")
-            return results
+            return [dict(row) for row in cursor.fetchall()]
     
     def ensure_default_admin(self):
         """Ensure default admin user exists."""
