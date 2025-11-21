@@ -1329,11 +1329,11 @@ class AuditLogViewer:
         """Refresh the activity tracking tab."""
         try:
             # Get filter values - using correct StringVar names
-            username = self.activity_user_var.get().strip() or None
-            activity_type = self.activity_type_var.get().strip()
+            username = self.activity_user_filter.get().strip() or None
+            activity_type = self.activity_type_filter.get().strip()
             
             print(f"=== ACTIVITY LOG FILTER CLICKED ===")
-            print(f"Username filter: '{self.activity_user_var.get()}'")
+            print(f"Username filter: '{self.activity_user_filter.get()}'")
             print(f"Activity type filter: '{activity_type}'")
             
             if activity_type == "All" or not activity_type:
