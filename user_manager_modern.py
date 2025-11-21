@@ -1289,16 +1289,13 @@ class AuditLogViewer:
     
     def _refresh_audit_log(self):
         """Refresh the audit log tab."""
-        print(f"DEBUG: _refresh_audit_log called, filter: '{self.audit_filter_var.get()}'")
         # Clear existing items
         for item in self.audit_tree.get_children():
             self.audit_tree.delete(item)
         
         # Get filtered logs
         target = self.audit_filter_var.get().strip() or None
-        print(f"DEBUG: Getting audit logs with target: {target}")
         logs = self.user_manager.get_user_audit_log(target_username=target, limit=500)
-        print(f"DEBUG: Got {len(logs)} audit log entries")
         
         # Add logs
         for log in logs:
@@ -1313,25 +1310,22 @@ class AuditLogViewer:
     
     def _refresh_activity_log(self):
         """Refresh the activity tracking tab."""
-        print(f"DEBUG: _refresh_activity_log called, user: '{self.activity_user_filter.get()}', type: '{self.activity_type_filter.get()}'")
         # Clear existing items
         for item in self.activity_tree.get_children():
             self.activity_tree.delete(item)
         
         # Get filter values
         username = self.activity_user_filter.get().strip() or None
-        activity_type = self.activity_type_filter.get()
-        if activity_type == "All":
+        activity_type = self.activity_type_filter.get().strip()
+        if activity_type == "All" or not activity_type:
             activity_type = None
         
-        print(f"DEBUG: Querying with username={username}, activity_type={activity_type}")
         # Get filtered activity logs
         logs = self.db_manager.get_user_activity_log(
             username=username,
             activity_type=activity_type,
             limit=500
         )
-        print(f"DEBUG: Got {len(logs)} activity log entries")
         
         # Add logs
         for log in logs:
