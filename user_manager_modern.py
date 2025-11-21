@@ -1282,7 +1282,7 @@ class AuditLogViewer:
             activity_type = None
         
         # Get filtered activity logs
-        logs = self.user_manager.db_manager.get_user_activity_log(
+        logs = self.user_manager.db.get_user_activity_log(
             username=username,
             activity_type=activity_type,
             limit=500
