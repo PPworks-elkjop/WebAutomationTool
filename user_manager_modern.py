@@ -1123,6 +1123,7 @@ class AuditLogViewer:
         filter_entry = tk.Entry(toolbar, textvariable=self.audit_filter_var, width=20,
                                font=("Segoe UI", 10), bd=1, relief="solid")
         filter_entry.pack(side="left", padx=(0, 5))
+        filter_entry.bind('<Return>', lambda e: self._refresh_audit_log())
         
         filter_btn = tk.Button(
             toolbar,
@@ -1203,6 +1204,7 @@ class AuditLogViewer:
         user_entry = tk.Entry(toolbar, textvariable=self.activity_user_filter, width=20,
                              font=("Segoe UI", 10), bd=1, relief="solid")
         user_entry.pack(side="left", padx=(0, 5))
+        user_entry.bind('<Return>', lambda e: self._refresh_activity_log())
         
         tk.Label(toolbar, text="Activity type:", font=("Segoe UI", 10),
                 bg="#F5F5F5", fg="#495057").pack(side="left", padx=(10, 5))
@@ -1289,13 +1291,17 @@ class AuditLogViewer:
     
     def _refresh_audit_log(self):
         """Refresh the audit log tab."""
-        # Clear existing items
-        for item in self.audit_tree.get_children():
-            self.audit_tree.delete(item)
-        
-        # Get filtered logs
-        target = self.audit_filter_var.get().strip() or None
-        logs = self.user_manager.get_user_audit_log(target_username=target, limit=500)
+        try:
+            # Clear existing items
+            for item in self.audit_tree.get_children():
+                self.audit_tree.delete(item)
+            
+            # Get filtered logs
+            target = self.audit_filter_var.get().strip() or None
+            logs = self.user_manager.get_user_audit_log(target_username=target, limit=500)
+        except Exception as e:
+            messagebox.showerror("Error", f"Audit log refresh error: {e}")
+            return
         
         # Add logs
         for log in logs:
@@ -1310,22 +1316,26 @@ class AuditLogViewer:
     
     def _refresh_activity_log(self):
         """Refresh the activity tracking tab."""
-        # Clear existing items
-        for item in self.activity_tree.get_children():
-            self.activity_tree.delete(item)
-        
-        # Get filter values
-        username = self.activity_user_filter.get().strip() or None
-        activity_type = self.activity_type_filter.get().strip()
-        if activity_type == "All" or not activity_type:
-            activity_type = None
-        
-        # Get filtered activity logs
-        logs = self.db_manager.get_user_activity_log(
-            username=username,
-            activity_type=activity_type,
-            limit=500
-        )
+        try:
+            # Clear existing items
+            for item in self.activity_tree.get_children():
+                self.activity_tree.delete(item)
+            
+            # Get filter values
+            username = self.activity_user_filter.get().strip() or None
+            activity_type = self.activity_type_filter.get().strip()
+            if activity_type == "All" or not activity_type:
+                activity_type = None
+            
+            # Get filtered activity logs
+            logs = self.db_manager.get_user_activity_log(
+                username=username,
+                activity_type=activity_type,
+                limit=500
+            )
+        except Exception as e:
+            messagebox.showerror("Error", f"Activity log refresh error: {e}")
+            return
         
         # Add logs
         for log in logs:
