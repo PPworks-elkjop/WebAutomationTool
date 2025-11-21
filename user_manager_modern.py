@@ -14,8 +14,23 @@ class ModernUserManager:
     def __init__(self, current_user, parent=None, db_manager=None):
         """Initialize the modern user manager."""
         self.current_user = current_user
-        self.db_manager = db_manager
-        self.user_manager = UserManager()
+        self.db_manager = db_manager if db_manager else None
+        
+        # If db_manager is provided, use it; otherwise create new UserManager
+        if db_manager:
+            # Create a wrapper that mimics UserManager interface
+            self.user_manager = type('obj', (object,), {
+                'db': db_manager,
+                'get_all_users': lambda: db_manager.get_all_users(),
+                'get_user': lambda username: db_manager.get_user(username),
+                'add_user': lambda username, full_name, password, role, created_by: db_manager.add_user(username, full_name, password, role, created_by),
+                'update_user': lambda username, **kwargs: db_manager.update_user(username, **kwargs),
+                'delete_user': lambda username, deleted_by: db_manager.delete_user(username, deleted_by),
+                'count': lambda: len(db_manager.get_all_users()),
+                'get_user_audit_log': lambda target_username=None, actor_username=None, limit=100: db_manager.get_user_audit_log(target_username, actor_username, limit)
+            })()
+        else:
+            self.user_manager = UserManager()
         
         if parent:
             self.root = tk.Toplevel(parent)
