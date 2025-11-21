@@ -1119,7 +1119,7 @@ class AuditLogViewer:
         
         tk.Label(toolbar, text="Filter by user:", font=("Segoe UI", 10),
                 bg="#F5F5F5", fg="#495057").pack(side="left", padx=(0, 5))
-        self.audit_filter_var = tk.StringVar()
+        self.audit_filter_var = tk.StringVar(master=self.window)
         filter_entry = tk.Entry(toolbar, textvariable=self.audit_filter_var, width=20,
                                font=("Segoe UI", 10), bd=1, relief="solid")
         filter_entry.pack(side="left", padx=(0, 5))
@@ -1200,7 +1200,7 @@ class AuditLogViewer:
         
         tk.Label(toolbar, text="Filter by user:", font=("Segoe UI", 10),
                 bg="#F5F5F5", fg="#495057").pack(side="left", padx=(0, 5))
-        self.activity_user_filter = tk.StringVar()
+        self.activity_user_filter = tk.StringVar(master=self.window)
         user_entry = tk.Entry(toolbar, textvariable=self.activity_user_filter, width=20,
                              font=("Segoe UI", 10), bd=1, relief="solid")
         user_entry.pack(side="left", padx=(0, 5))
@@ -1208,7 +1208,7 @@ class AuditLogViewer:
         
         tk.Label(toolbar, text="Activity type:", font=("Segoe UI", 10),
                 bg="#F5F5F5", fg="#495057").pack(side="left", padx=(10, 5))
-        self.activity_type_filter = tk.StringVar(value="All")
+        self.activity_type_filter = tk.StringVar(master=self.window, value="All")
         type_combo = ttk.Combobox(toolbar, textvariable=self.activity_type_filter, width=18,
                                  font=("Segoe UI", 10), state="readonly")
         type_combo['values'] = ("All", "login", "logout", "ap_connect", "provision", "ssh_enable", "ssh_disable", 
