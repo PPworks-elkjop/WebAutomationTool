@@ -1291,10 +1291,10 @@ class AuditLogViewer:
     def _refresh_audit_log(self):
         """Refresh the audit log tab."""
         try:
-            target = self.audit_filter_var.get().strip() or None
+            actor = self.audit_filter_var.get().strip() or None
             print(f"=== AUDIT LOG FILTER CLICKED ===")
             print(f"Filter value: '{self.audit_filter_var.get()}'")
-            print(f"Target (after processing): {target}")
+            print(f"Actor (after processing): {actor}")
             
             # Clear existing items
             item_count = len(self.audit_tree.get_children())
@@ -1302,9 +1302,9 @@ class AuditLogViewer:
             for item in self.audit_tree.get_children():
                 self.audit_tree.delete(item)
             
-            # Get filtered logs
-            print(f"Calling get_user_audit_log with target_username={target}")
-            logs = self.user_manager.get_user_audit_log(target_username=target, limit=500)
+            # Get filtered logs - filter by actor (who performed the action)
+            print(f"Calling get_user_audit_log with actor_username={actor}")
+            logs = self.user_manager.get_user_audit_log(actor_username=actor, limit=500)
             print(f"Got {len(logs)} audit log entries")
         except Exception as e:
             print(f"ERROR in _refresh_audit_log: {e}")
