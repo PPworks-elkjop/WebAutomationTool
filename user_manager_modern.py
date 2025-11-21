@@ -533,15 +533,9 @@ class ModernUserManager:
             messagebox.showerror("Access Denied", "Only administrators can view audit logs")
             return
         
-        # Debug to file
-        with open("debug_audit.txt", "w") as f:
-            f.write(f"ModernUserManager._view_audit_log:\n")
-            f.write(f"  self.user_manager type: {type(self.user_manager)}\n")
-            f.write(f"  Has db attr: {hasattr(self.user_manager, 'db')}\n")
-            if hasattr(self.user_manager, 'db'):
-                f.write(f"  self.user_manager.db type: {type(self.user_manager.db)}\n")
-        
-        AuditLogViewer(self.root, self.user_manager)
+        # Pass the database manager directly
+        db = self.user_manager.db if hasattr(self.user_manager, 'db') else self.db_manager
+        AuditLogViewer(self.root, self.user_manager, db)
 
 
 class UserDialog:
@@ -1073,11 +1067,9 @@ class PasswordDialog:
 class AuditLogViewer:
     """Viewer for audit logs and user activity tracking."""
     
-    def __init__(self, parent, user_manager):
-        print(f"DEBUG AuditLogViewer: Received user_manager type: {type(user_manager)}")
-        print(f"DEBUG AuditLogViewer: Has db attr: {hasattr(user_manager, 'db')}")
+    def __init__(self, parent, user_manager, db_manager):
         self.user_manager = user_manager
-        print(f"DEBUG AuditLogViewer: After assignment, self.user_manager type: {type(self.user_manager)}")
+        self.db_manager = db_manager
         
         self.window = tk.Toplevel(parent)
         self.window.title("User Audit Log & Activity Tracking")
@@ -1333,15 +1325,11 @@ class AuditLogViewer:
             activity_type = None
         
         # Get filtered activity logs
-        try:
-            logs = self.user_manager.db.get_user_activity_log(
-                username=username,
-                activity_type=activity_type,
-                limit=500
-            )
-        except AttributeError as e:
-            messagebox.showerror("Error", f"Failed to get activity log: {str(e)}\nuser_manager type: {type(self.user_manager)}\nhas db attr: {hasattr(self.user_manager, 'db')}")
-            return
+        logs = self.db_manager.get_user_activity_log(
+            username=username,
+            activity_type=activity_type,
+            limit=500
+        )
         
         # Add logs
         for log in logs:
