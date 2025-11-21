@@ -13,6 +13,7 @@ import threading
 from cryptography.fernet import Fernet
 import base64
 import hashlib
+import bcrypt
 
 class DatabaseManager:
     """Manages VERA database with encryption for sensitive fields."""
@@ -847,14 +848,14 @@ class DatabaseManager:
                 if role not in ['Admin', 'User']:
                     return False, f"Invalid role. Must be 'Admin' or 'User'"
                 
-                # Encrypt password
-                encrypted_password = self._encrypt(password)
+                # Hash password with bcrypt (secure hashing, not encryption)
+                hashed_password = self._hash_password(password)
                 
                 # Insert user
                 cursor.execute('''
                     INSERT INTO users (username, full_name, password, role, email, created_by, updated_by, is_active)
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                ''', (username, full_name, encrypted_password, role, email, created_by, created_by, 1 if is_active else 0))
+                ''', (username, full_name, hashed_password, role, email, created_by, created_by, 1 if is_active else 0))
                 
                 # Log the action
                 self._log_user_audit(cursor, created_by or 'system', 'create_user', username, 
@@ -902,9 +903,9 @@ class DatabaseManager:
                     changes.append(f"status: {'active' if user_dict.get('is_active', 1) else 'inactive'} -> {'active' if is_active else 'inactive'}")
                 
                 if password is not None:
-                    encrypted_password = self._encrypt(password)
+                    hashed_password = self._hash_password(password)
                     updates.append('password = ?')
-                    params.append(encrypted_password)
+                    params.append(hashed_password)
                     changes.append("password changed")
                     # Log password change separately
                     self._log_user_audit(cursor, updated_by or 'system', 'change_password', 
@@ -1000,7 +1001,34 @@ class DatabaseManager:
     def authenticate_user(self, username: str, password: str) -> Optional[Dict]:
         """Authenticate user and return user info if successful."""
         user = self.get_user(username)
-        if user and user.get('is_active', True) and user['password'] == password:
+        if not user or not user.get('is_active', True):
+            return None
+        
+        # Verify password using bcrypt
+        try:
+            stored_password = user['password']
+            
+            # Check if password is bcrypt hashed (starts with $2b$)
+            if stored_password.startswith('$2b$'):
+                # Verify bcrypt hash
+                if not bcrypt.checkpw(password.encode('utf-8'), stored_password.encode('utf-8')):
+                    return None
+            else:
+                # Legacy plaintext or encrypted password - auto-upgrade to bcrypt
+                # First check if it matches (could be plaintext or decrypted)
+                try:
+                    decrypted = self._decrypt(stored_password)
+                    if decrypted != password:
+                        return None
+                    # Password is correct - upgrade to bcrypt
+                    self._upgrade_password_to_bcrypt(username, password)
+                except:
+                    # Not encrypted, try plaintext comparison
+                    if stored_password != password:
+                        return None
+                    # Password is correct - upgrade to bcrypt
+                    self._upgrade_password_to_bcrypt(username, password)
+            
             # Update last login
             try:
                 with self._get_connection() as conn:
@@ -1020,14 +1048,39 @@ class DatabaseManager:
             return {
                 'full_name': user['full_name'],
                 'username': user['username'],
-                'role': user['role']
+                'role': user['role'],
+                'last_activity': datetime.now().isoformat()  # Track session start
             }
-        return None
+        except Exception as e:
+            print(f"Authentication error: {e}")
+            return None
     
     def is_admin(self, username: str) -> bool:
         """Check if user is an admin."""
         user = self.get_user(username)
         return user and user['role'] == 'Admin'
+    
+    def _hash_password(self, password: str) -> str:
+        """Hash password using bcrypt (industry standard)."""
+        # Generate salt and hash password
+        salt = bcrypt.gensalt(rounds=12)  # 12 rounds is good balance of security/performance
+        hashed = bcrypt.hashpw(password.encode('utf-8'), salt)
+        return hashed.decode('utf-8')
+    
+    def _upgrade_password_to_bcrypt(self, username: str, password: str):
+        """Upgrade user password from plaintext/encrypted to bcrypt hash."""
+        try:
+            hashed_password = self._hash_password(password)
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute('''
+                    UPDATE users SET password = ?, updated_at = CURRENT_TIMESTAMP
+                    WHERE username = ? COLLATE NOCASE
+                ''', (hashed_password, username))
+                conn.commit()
+                print(f"Password upgraded to bcrypt hash for user: {username}")
+        except Exception as e:
+            print(f"Error upgrading password to bcrypt: {e}")
     
     def _log_user_audit(self, cursor, actor: str, action: str, target: str, 
                        details: str = None, success: bool = True):

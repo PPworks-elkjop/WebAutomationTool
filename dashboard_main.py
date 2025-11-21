@@ -24,6 +24,11 @@ class DashboardMain:
         # Get username string from current_user (dict or string)
         self.username = current_user.get('username') if isinstance(current_user, dict) else current_user
         
+        # Session management
+        self.last_activity = datetime.now()
+        self.session_timeout = 30 * 60  # 30 minutes in seconds
+        self.clipboard_clear_timer = None  # For auto-clearing sensitive clipboard data
+        
         # Window setup
         self.root.title("VERA - Vusion support with a human touch")
         self.root.configure(bg="#F0F0F0")
@@ -69,6 +74,12 @@ class DashboardMain:
         
         # Start auto-refresh timer (check for credential updates every minute)
         self.root.after(60000, self._auto_refresh_credentials)
+        
+        # Start session timeout checker (every 60 seconds)
+        self.root.after(60000, self._check_session_timeout)
+        
+        # Track user activity to reset session timeout
+        self._bind_activity_tracking()
     
     def _create_menu(self):
         """Create custom menu bar with buttons (modern styling with full control)."""
@@ -1008,6 +1019,109 @@ class DashboardMain:
         
         # Schedule next refresh in 60 seconds
         self.root.after(60000, self._auto_refresh_credentials)
+    
+    def _bind_activity_tracking(self):
+        """Bind events to track user activity for session timeout."""
+        def reset_activity(event=None):
+            self.last_activity = datetime.now()
+        
+        # Track mouse and keyboard activity
+        self.root.bind_all('<Motion>', reset_activity)
+        self.root.bind_all('<Button>', reset_activity)
+        self.root.bind_all('<Key>', reset_activity)
+    
+    def _check_session_timeout(self):
+        """Check if session has timed out due to inactivity."""
+        try:
+            time_inactive = (datetime.now() - self.last_activity).total_seconds()
+            
+            # Warn at 5 minutes before timeout
+            if time_inactive > (self.session_timeout - 300) and time_inactive < self.session_timeout:
+                remaining = int((self.session_timeout - time_inactive) / 60)
+                if hasattr(self, 'activity_log'):
+                    self.activity_log.log_message(
+                        "Security", 
+                        f"Session will expire in {remaining} minute(s) due to inactivity", 
+                        "warning"
+                    )
+            
+            # Timeout reached
+            if time_inactive > self.session_timeout:
+                self._handle_session_timeout()
+                return  # Don't schedule next check
+            
+        except Exception as e:
+            print(f"Session timeout check error: {e}")
+        
+        # Schedule next check in 60 seconds
+        self.root.after(60000, self._check_session_timeout)
+    
+    def _handle_session_timeout(self):
+        """Handle session timeout by logging out user."""
+        messagebox.showwarning(
+            "Session Expired",
+            f"Your session has expired due to {int(self.session_timeout/60)} minutes of inactivity.\n\n"
+            "Please log in again to continue.",
+            parent=self.root
+        )
+        
+        if hasattr(self, 'activity_log'):
+            self.activity_log.log_message(
+                "Security", 
+                f"User '{self.username}' session expired due to inactivity", 
+                "warning"
+            )
+        
+        # Close application (user must log in again)
+        self._on_exit()
+    
+    def secure_clipboard_copy(self, text: str, auto_clear_seconds: int = 30):
+        """
+        Copy text to clipboard with automatic clearing after specified time.
+        Used for sensitive data like passwords and credentials.
+        
+        Args:
+            text: Text to copy to clipboard
+            auto_clear_seconds: Seconds before auto-clearing (default 30)
+        """
+        try:
+            # Cancel any existing timer
+            if self.clipboard_clear_timer:
+                self.root.after_cancel(self.clipboard_clear_timer)
+            
+            # Clear and copy
+            self.root.clipboard_clear()
+            self.root.clipboard_append(text)
+            
+            # Log the action
+            if hasattr(self, 'activity_log'):
+                self.activity_log.log_message(
+                    "Security", 
+                    f"Copied to clipboard (will auto-clear in {auto_clear_seconds}s)",
+                    "info"
+                )
+            
+            # Schedule auto-clear
+            self.clipboard_clear_timer = self.root.after(
+                auto_clear_seconds * 1000,
+                self._clear_clipboard_secure
+            )
+            
+        except Exception as e:
+            print(f"Secure clipboard error: {e}")
+    
+    def _clear_clipboard_secure(self):
+        """Clear clipboard and log the action."""
+        try:
+            self.root.clipboard_clear()
+            if hasattr(self, 'activity_log'):
+                self.activity_log.log_message(
+                    "Security", 
+                    "Clipboard auto-cleared for security",
+                    "info"
+                )
+        except Exception as e:
+            print(f"Clipboard clear error: {e}")
 
 
 def main():
