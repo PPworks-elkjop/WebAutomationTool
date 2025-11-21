@@ -501,7 +501,10 @@ class DashboardMain:
             return
         try:
             from user_manager_modern import AuditLogViewer
-            AuditLogViewer(self.root, self.db)
+            from user_manager_v2 import UserManager
+            # Create a minimal user manager wrapper for the audit viewer
+            user_mgr = UserManager()
+            AuditLogViewer(self.root, user_mgr, self.db)
             self.activity_log.log_message("Admin", "Opened Audit Log", "info")
         except Exception as e:
             messagebox.showerror("Error", f"Failed to open Audit Log: {e}")
