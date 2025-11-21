@@ -28,6 +28,8 @@ class DashboardMain:
         self.last_activity = datetime.now()
         self.session_timeout = 30 * 60  # 30 minutes in seconds
         self.clipboard_clear_timer = None  # For auto-clearing sensitive clipboard data
+        self.batch_operations_active = False  # Pause timeout during batch operations
+        self.active_batch_windows = []  # Track active batch operation windows
         
         # Window setup
         self.root.title("VERA - Vusion support with a human touch")
@@ -424,7 +426,8 @@ class DashboardMain:
         """Open batch ping window (independent)."""
         try:
             from batch_ping import BatchPingWindow
-            BatchPingWindow(self.root, self.current_user, self.db)
+            window = BatchPingWindow(self.root, self.current_user, self.db)
+            self._register_batch_window(window)
             self.activity_log.log_message("Tools", "Opened Batch Ping", "info")
         except Exception as e:
             messagebox.showerror("Error", f"Failed to open Batch Ping: {e}")
@@ -433,7 +436,8 @@ class DashboardMain:
         """Open batch browser operations window (independent)."""
         try:
             from batch_browser import BatchBrowserWindow
-            BatchBrowserWindow(self.root, self.current_user, self.db)
+            window = BatchBrowserWindow(self.root, self.current_user, self.db)
+            self._register_batch_window(window)
             self.activity_log.log_message("Tools", "Opened Batch Browser", "info")
         except Exception as e:
             messagebox.showerror("Error", f"Failed to open Batch Browser: {e}")
@@ -442,7 +446,8 @@ class DashboardMain:
         """Open batch SSH operations window (independent)."""
         try:
             from batch_ssh import BatchSSHWindow
-            BatchSSHWindow(self.root, self.current_user, self.db)
+            window = BatchSSHWindow(self.root, self.current_user, self.db)
+            self._register_batch_window(window)
             self.activity_log.log_message("Tools", "Opened Batch SSH", "info")
         except Exception as e:
             messagebox.showerror("Error", f"Failed to open Batch SSH: {e}")
@@ -1033,22 +1038,30 @@ class DashboardMain:
     def _check_session_timeout(self):
         """Check if session has timed out due to inactivity."""
         try:
-            time_inactive = (datetime.now() - self.last_activity).total_seconds()
-            
-            # Warn at 5 minutes before timeout
-            if time_inactive > (self.session_timeout - 300) and time_inactive < self.session_timeout:
-                remaining = int((self.session_timeout - time_inactive) / 60)
+            # Skip timeout check if batch operations are running
+            if self.batch_operations_active:
                 if hasattr(self, 'activity_log'):
-                    self.activity_log.log_message(
-                        "Security", 
-                        f"Session will expire in {remaining} minute(s) due to inactivity", 
-                        "warning"
-                    )
-            
-            # Timeout reached
-            if time_inactive > self.session_timeout:
-                self._handle_session_timeout()
-                return  # Don't schedule next check
+                    # Only log once when batch ops start, not every minute
+                    pass
+                # Reset activity timer while batch ops are running
+                self.last_activity = datetime.now()
+            else:
+                time_inactive = (datetime.now() - self.last_activity).total_seconds()
+                
+                # Warn at 5 minutes before timeout
+                if time_inactive > (self.session_timeout - 300) and time_inactive < self.session_timeout:
+                    remaining = int((self.session_timeout - time_inactive) / 60)
+                    if hasattr(self, 'activity_log'):
+                        self.activity_log.log_message(
+                            "Security", 
+                            f"Session will expire in {remaining} minute(s) due to inactivity", 
+                            "warning"
+                        )
+                
+                # Timeout reached
+                if time_inactive > self.session_timeout:
+                    self._handle_session_timeout()
+                    return  # Don't schedule next check
             
         except Exception as e:
             print(f"Session timeout check error: {e}")
@@ -1074,6 +1087,63 @@ class DashboardMain:
         
         # Close application (user must log in again)
         self._on_exit()
+    
+    def _register_batch_window(self, batch_window):
+        """
+        Register a batch operation window to pause session timeout.
+        
+        Args:
+            batch_window: Batch operation window instance
+        """
+        self.active_batch_windows.append(batch_window)
+        self._update_batch_status()
+        
+        # Monitor when the batch window closes
+        def on_batch_window_close():
+            if batch_window in self.active_batch_windows:
+                self.active_batch_windows.remove(batch_window)
+            self._update_batch_status()
+        
+        # Hook into the batch window's close event
+        if hasattr(batch_window, 'window'):
+            original_destroy = batch_window.window.destroy
+            def wrapped_destroy():
+                on_batch_window_close()
+                original_destroy()
+            batch_window.window.destroy = wrapped_destroy
+    
+    def _update_batch_status(self):
+        """Update batch operations status and log changes."""
+        was_active = self.batch_operations_active
+        
+        # Check if any batch windows have running operations
+        self.batch_operations_active = any(
+            hasattr(w, 'operation_running') and w.operation_running 
+            for w in self.active_batch_windows
+        )
+        
+        # Log status changes
+        if was_active != self.batch_operations_active:
+            if self.batch_operations_active:
+                if hasattr(self, 'activity_log'):
+                    self.activity_log.log_message(
+                        "Security",
+                        "Session timeout paused - batch operation running",
+                        "info"
+                    )
+            else:
+                if hasattr(self, 'activity_log'):
+                    self.activity_log.log_message(
+                        "Security",
+                        "Session timeout resumed - batch operation completed",
+                        "info"
+                    )
+                # Reset activity timer when batch ops complete
+                self.last_activity = datetime.now()
+        
+        # Schedule next check if we have active windows
+        if self.active_batch_windows:
+            self.root.after(5000, self._update_batch_status)  # Check every 5 seconds
     
     def secure_clipboard_copy(self, text: str, auto_clear_seconds: int = 30):
         """
