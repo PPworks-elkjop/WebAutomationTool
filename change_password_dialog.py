@@ -25,7 +25,7 @@ class ChangePasswordDialog:
         
         self.dialog = tk.Toplevel(parent)
         self.dialog.title("Change Password")
-        self.dialog.geometry("500x450")
+        self.dialog.geometry("500x550")
         self.dialog.configure(bg="#F5F5F5")
         self.dialog.transient(parent)
         self.dialog.resizable(False, False)
