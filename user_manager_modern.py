@@ -533,6 +533,14 @@ class ModernUserManager:
             messagebox.showerror("Access Denied", "Only administrators can view audit logs")
             return
         
+        # Debug to file
+        with open("debug_audit.txt", "w") as f:
+            f.write(f"ModernUserManager._view_audit_log:\n")
+            f.write(f"  self.user_manager type: {type(self.user_manager)}\n")
+            f.write(f"  Has db attr: {hasattr(self.user_manager, 'db')}\n")
+            if hasattr(self.user_manager, 'db'):
+                f.write(f"  self.user_manager.db type: {type(self.user_manager.db)}\n")
+        
         AuditLogViewer(self.root, self.user_manager)
 
 
@@ -1066,7 +1074,10 @@ class AuditLogViewer:
     """Viewer for audit logs and user activity tracking."""
     
     def __init__(self, parent, user_manager):
+        print(f"DEBUG AuditLogViewer: Received user_manager type: {type(user_manager)}")
+        print(f"DEBUG AuditLogViewer: Has db attr: {hasattr(user_manager, 'db')}")
         self.user_manager = user_manager
+        print(f"DEBUG AuditLogViewer: After assignment, self.user_manager type: {type(self.user_manager)}")
         
         self.window = tk.Toplevel(parent)
         self.window.title("User Audit Log & Activity Tracking")
