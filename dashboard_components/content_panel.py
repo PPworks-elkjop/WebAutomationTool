@@ -1477,6 +1477,9 @@ class ContentPanel:
                                                                  headline, note_content)
             if success:
                 self._log(f"Note added: {headline}", "success")
+                # Log user activity
+                self.db.log_user_activity(username, 'note_create', f'Created note: {headline}', 
+                                         ap_id=ap_id, success=True)
                 # Refresh context panel to show new note
                 if self.refresh_callback:
                     self.refresh_callback()
@@ -1802,6 +1805,9 @@ class ContentPanel:
                                                                  headline, content)
             if success:
                 self._log(f"Note added: {headline}", "success")
+                # Log user activity
+                self.db.log_user_activity(username, 'note_create', f'Created note: {headline}', 
+                                         ap_id=ap_id, success=True)
                 # Refresh notes display
                 self.show_notes(ap_id)
                 dialog.destroy()
@@ -1895,6 +1901,9 @@ class ContentPanel:
                     success, message = self.db.delete_note_reply(reply['id'], username)
                     if success:
                         self._log("Reply deleted", "success")
+                        # Log user activity
+                        self.db.log_user_activity(username, 'note_reply_delete', f'Deleted reply on note: {note.get("headline", "Unknown")}', 
+                                                 ap_id=ap_id, success=True)
                         # Refresh context panel to update reply count
                         if self.refresh_callback:
                             self.refresh_callback()
@@ -2111,6 +2120,9 @@ class ContentPanel:
                     success, message = self.db.delete_support_note(note['id'], username)
                     if success:
                         self._log("Note deleted", "success")
+                        # Log user activity
+                        self.db.log_user_activity(username, 'note_delete', f'Deleted note: {note.get("headline", "Unknown")}', 
+                                                 ap_id=ap_id, success=True)
                         # Refresh context panel to remove deleted note from list
                         if self.refresh_callback:
                             self.refresh_callback()
@@ -2181,6 +2193,9 @@ class ContentPanel:
             success, message, reply_id = self.db.add_note_reply(note['id'], username, reply_text)
             if success:
                 self._log(f"Reply added to note: {note['headline']}", "success")
+                # Log user activity
+                self.db.log_user_activity(username, 'note_reply', f'Replied to note: {note.get("headline", "Unknown")}', 
+                                         ap_id=ap_id, success=True)
                 # Refresh context panel to update reply count
                 if self.refresh_callback:
                     self.refresh_callback()

@@ -955,6 +955,9 @@ TODO: Implement actual Vusion API integration
                                                                  headline, content)
             if success:
                 self._log(f"Note added: {headline}", "success")
+                # Log user activity
+                self.db.log_user_activity(username, 'note_create', f'Created note: {headline}', 
+                                         ap_id=self.active_ap, success=True)
                 # Refresh notes display
                 self._load_notes()
                 dialog.destroy()

@@ -1209,7 +1209,9 @@ class AuditLogViewer:
         self.activity_type_filter = tk.StringVar()
         type_combo = ttk.Combobox(toolbar, textvariable=self.activity_type_filter, width=18,
                                  font=("Segoe UI", 10), state="readonly")
-        type_combo['values'] = ("All", "login", "logout", "ap_connect", "provision", "config_change", "view_credentials")
+        type_combo['values'] = ("All", "login", "logout", "ap_connect", "provision", "ssh_enable", "ssh_disable", 
+                                 "note_create", "note_delete", "note_reply", "note_reply_delete", 
+                                 "view_credentials", "user_management", "password_change", "view_audit")
         type_combo.current(0)
         type_combo.pack(side="left", padx=(0, 5))
         
