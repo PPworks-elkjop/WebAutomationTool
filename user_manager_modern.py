@@ -1363,6 +1363,8 @@ class AuditLogViewer:
             return
         
         # Add logs
+        print(f"Adding {len(logs)} logs to tree...")
+        items_added = 0
         for log in logs:
             success_text = "✓" if log.get('success', True) else "✗"
             values = (
@@ -1375,6 +1377,9 @@ class AuditLogViewer:
                 log.get('details', '') or ''
             )
             self.activity_tree.insert('', 'end', values=values)
+            items_added += 1
+        print(f"Successfully added {items_added} items to activity tree")
+        print(f"Tree now has {len(self.activity_tree.get_children())} total items")
 
 
 def open_user_manager(current_user, parent=None, db_manager=None):
