@@ -391,46 +391,24 @@ class ModernCredentialManager:
         self.search_timer = self.root.after(300, self._on_search)
     
     def _on_search(self):
-        """Handle search input with detailed logging."""
+        """Handle search input."""
         # Get value directly from entry widget (more reliable than StringVar)
         query = self.search_entry.get().strip() if hasattr(self, 'search_entry') else ""
         
-        print(f"[SEARCH] Query: '{query}'")
-        
         if query:
             try:
-                print(f"[SEARCH] Calling credential_manager.search('{query}')...")
                 results = self.credential_manager.search(query)
-                print(f"[SEARCH] Results type: {type(results)}")
-                print(f"[SEARCH] Results count: {len(results) if results else 0}")
                 
                 if results:
-                    print(f"[SEARCH] First result: {results[0] if results else 'None'}")
                     self._refresh_list(results)
                     self.status_label.config(text=f"Search: '{query}' - Found {len(results)} results")
-                    print(f"[SEARCH] Successfully displayed {len(results)} results")
-                    
-                    # Log search action
-                    if self.db_manager and self.current_user:
-                        self._log_action(
-                            'search',
-                            f"Searched AP credentials: '{query}' - Found {len(results)} results",
-                            None,
-                            True
-                        )
                 else:
                     # No results found - clear list and show message
-                    print(f"[SEARCH] No results found for '{query}'")
                     self._refresh_list([])
                     self.status_label.config(text=f"Search: '{query}' - No results found")
             except Exception as e:
-                import traceback
-                error_details = traceback.format_exc()
-                print(f"[SEARCH ERROR] Exception: {e}")
-                print(f"[SEARCH ERROR] Traceback:\n{error_details}")
                 self.status_label.config(text=f"Search error: {str(e)}")
         else:
-            print(f"[SEARCH] Empty query, showing all results")
             self._refresh_list()
             self.status_label.config(text="Ready")
     
