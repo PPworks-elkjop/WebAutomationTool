@@ -304,13 +304,13 @@ class ContextPanel:
         
         self.header_label.config(text=f"Context: AP {ap_id}")
         
-        # Load notes for this AP
+        # Load notes for this AP (fast, no API calls)
         self._load_notes()
         
-        # Load Jira tickets for this AP
-        self._load_jira_tickets()
+        # Load Jira tickets in background to avoid UI freezing
+        self._load_jira_tickets_background()
         
-        # Load Vusion data for this AP
+        # Load Vusion data for this AP (fast, no API calls)
         self._load_vusion_data()
         
         self._log(f"Context updated for AP {ap_id}")
@@ -346,15 +346,29 @@ class ContextPanel:
                     font=('Segoe UI', 9), bg="#FFFFFF", fg="#DC3545").pack(pady=20)
             self._log(f"Error loading notes: {str(e)}", "error")
     
+    def _load_jira_tickets_background(self):
+        """Load Jira tickets asynchronously to avoid UI freezing."""
+        # Show loading message immediately
+        for widget in self.jira_tickets_frame.winfo_children():
+            widget.destroy()
+        
+        loading_label = tk.Label(self.jira_tickets_frame, 
+                                text="🔄 Loading Jira tickets...",
+                                font=('Segoe UI', 10), bg="#FFFFFF", fg="#6C757D")
+        loading_label.pack(pady=20)
+        
+        # Use after() to run loading on main thread but yield to UI
+        self.parent.after(50, self._load_jira_tickets)
+    
     def _load_jira_tickets(self):
         """Load Jira tickets related to active AP with filters."""
         if not self.active_ap:
-            # Show placeholder, hide content
+            # Show placeholder
             self.jira_content_frame.pack_forget()
             self.jira_placeholder_frame.pack(fill=tk.BOTH, expand=True)
             return
         
-        # Hide placeholder, show content
+        # Setup UI
         self.jira_placeholder_frame.pack_forget()
         self.jira_content_frame.pack(fill=tk.BOTH, expand=True)
         
@@ -463,11 +477,11 @@ class ContextPanel:
                     
                     filtered_issues.append(issue)
                 
+                # Display tickets
                 if filtered_issues:
                     for issue in filtered_issues:
                         self._create_jira_ticket_card(issue)
                         self.jira_tickets.append(issue)
-                    
                     self._log(f"Loaded {len(filtered_issues)} Jira tickets (filtered from {len(issues)} total)")
                 else:
                     # Show appropriate message based on search type
@@ -648,7 +662,7 @@ class ContextPanel:
     def _apply_jira_filters(self):
         """Apply filters and reload Jira tickets."""
         self._log("Applying Jira filters...")
-        self._load_jira_tickets()
+        self._load_jira_tickets_background()
     
     def _update_project_filters(self, issues):
         """Update project filter checkboxes based on found issues."""
@@ -793,7 +807,7 @@ TODO: Implement actual Vusion API integration
     def _refresh_jira(self):
         """Refresh Jira ticket list."""
         self._log("Refreshing Jira tickets...")
-        self._load_jira_tickets()
+        self._load_jira_tickets_background()
     
     def _show_placeholder(self):
         """Show placeholder when no AP is active."""

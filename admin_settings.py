@@ -84,9 +84,9 @@ class AdminSettingsDialog:
         self.notebook.add(self.jira_tab, text="Jira Integration")
         self._build_jira_tab()
         
-        # Vusion Cloud tab
+        # Vusion Manager Pro tab
         self.vusion_tab = tk.Frame(self.notebook, bg="white")
-        self.notebook.add(self.vusion_tab, text="Vusion Cloud (Future)")
+        self.notebook.add(self.vusion_tab, text="Vusion Manager Pro")
         self._build_vusion_tab()
         
         # Bottom buttons
@@ -326,13 +326,31 @@ class AdminSettingsDialog:
         self._load_jira_credentials()
     
     def _build_vusion_tab(self):
-        """Build Vusion Cloud configuration tab (placeholder for future)."""
-        main_frame = tk.Frame(self.vusion_tab, bg="white", padx=30, pady=30)
+        """Build Vusion Manager Pro configuration tab with multi-store support."""
+        # Scroll frame for content
+        canvas = tk.Canvas(self.vusion_tab, bg="white", highlightthickness=0)
+        scrollbar = ttk.Scrollbar(self.vusion_tab, orient="vertical", command=canvas.yview)
+        scroll_frame = tk.Frame(canvas, bg="white")
+        
+        scroll_frame.bind(
+            "<Configure>",
+            lambda e: canvas.configure(scrollregion=canvas.bbox("all"))
+        )
+        
+        canvas.create_window((0, 0), window=scroll_frame, anchor="nw")
+        canvas.configure(yscrollcommand=scrollbar.set)
+        
+        canvas.pack(side="left", fill="both", expand=True)
+        scrollbar.pack(side="right", fill="y")
+        
+        # Content
+        main_frame = tk.Frame(scroll_frame, bg="white", padx=30, pady=30)
         main_frame.pack(fill="both", expand=True)
         
+        # Title and description
         tk.Label(
             main_frame,
-            text="Vusion Cloud Integration",
+            text="Vusion Manager Pro API Configuration",
             font=("Segoe UI", 14, "bold"),
             bg="white",
             fg="#2C3E50"
@@ -340,21 +358,182 @@ class AdminSettingsDialog:
         
         tk.Label(
             main_frame,
-            text="Coming Soon",
-            font=("Segoe UI", 12),
-            bg="white",
-            fg="#999999"
-        ).pack(anchor="w", pady=(20, 10))
-        
-        tk.Label(
-            main_frame,
-            text="Vusion Cloud API integration will be available in a future update.\nThis will enable direct communication with Vusion Group's cloud platform.",
+            text="Configure Vusion Manager Pro API keys for all retail chains. This enables real-time AP/transmitter status display in the AP Panel.",
             font=("Segoe UI", 9),
             bg="white",
             fg="#666666",
             wraplength=700,
             justify="left"
         ).pack(anchor="w", pady=(0, 20))
+        
+        # Define stores with their details
+        self.vusion_stores = [
+            {"name": "Elkjøp Norway", "store_id": "elkjop_no", "country": "NO", "chain": "Elkjøp"},
+            {"name": "Elgiganten Sweden", "store_id": "elgiganten_se", "country": "SE", "chain": "Elgiganten"},
+            {"name": "Elgiganten Denmark", "store_id": "elgiganten_dk", "country": "DK", "chain": "Elgiganten"},
+            {"name": "Gigantti Finland", "store_id": "gigantti_fi", "country": "FI", "chain": "Gigantti"},
+            {"name": "Elkjøp SE Lab", "store_id": "elkjop_se_lab.lab5", "country": "LAB", "chain": "Elkjøp (Test)"},
+        ]
+        
+        # Store entry widgets for later access
+        self.vusion_entries = {}
+        
+        # Create configuration sections for each store
+        for store in self.vusion_stores:
+            self._create_store_config_section(main_frame, store)
+        
+        # Info section
+        info_frame = tk.Frame(main_frame, bg="#E7F3FF", bd=1, relief=tk.SOLID)
+        info_frame.pack(fill="x", pady=(20, 0))
+        
+        tk.Label(
+            info_frame,
+            text="ℹ️  Configuration Info",
+            font=("Segoe UI", 9, "bold"),
+            bg="#E7F3FF",
+            fg="#004085"
+        ).pack(anchor="w", padx=10, pady=(10, 5))
+        
+        tk.Label(
+            info_frame,
+            text="• API keys are encrypted and stored securely\n"
+                 "• Each store/chain can have its own API key\n"
+                 "• Test each connection after saving to verify it works\n"
+                 "• The API displays real-time AP status (🟢 online / 🔴 offline) in AP Panel",
+            font=("Segoe UI", 9),
+            bg="#E7F3FF",
+            fg="#004085",
+            justify="left"
+        ).pack(anchor="w", padx=10, pady=(0, 10))
+        
+        # Load existing credentials
+        self._load_all_vusion_credentials()
+    
+    def _create_store_config_section(self, parent, store):
+        """Create a configuration section for a single store."""
+        # Container for this store
+        store_frame = tk.Frame(parent, bg="white", bd=1, relief=tk.SOLID)
+        store_frame.pack(fill="x", pady=(0, 15))
+        
+        # Header with store name
+        header_frame = tk.Frame(store_frame, bg="#F8F9FA")
+        header_frame.pack(fill="x")
+        
+        tk.Label(
+            header_frame,
+            text=f"{store['name']} - {store['chain']} (Country: {store['country']})",
+            font=("Segoe UI", 11, "bold"),
+            bg="#F8F9FA",
+            fg="#2C3E50"
+        ).pack(side="left", anchor="w", padx=15, pady=10)
+        
+        # Content
+        content_frame = tk.Frame(store_frame, bg="white", padx=15, pady=10)
+        content_frame.pack(fill="x")
+        
+        # Store ID (readonly display)
+        tk.Label(
+            content_frame,
+            text=f"Store ID: {store['store_id']}",
+            font=("Segoe UI", 9),
+            bg="white",
+            fg="#666666"
+        ).pack(anchor="w")
+        
+        # API Key input
+        key_frame = tk.Frame(content_frame, bg="white")
+        key_frame.pack(fill="x", pady=(10, 0))
+        
+        tk.Label(
+            key_frame,
+            text="API Key:",
+            font=("Segoe UI", 9, "bold"),
+            bg="white"
+        ).pack(anchor="w")
+        
+        key_input_frame = tk.Frame(key_frame, bg="white")
+        key_input_frame.pack(fill="x", pady=(5, 0))
+        
+        api_key_entry = tk.Entry(
+            key_input_frame,
+            font=("Segoe UI", 9),
+            bg="#F8F9FA",
+            relief="solid",
+            bd=1,
+            show="●"
+        )
+        api_key_entry.pack(side="left", fill="x", expand=True, ipady=4)
+        
+        show_var = tk.BooleanVar(value=False)
+        show_check = tk.Checkbutton(
+            key_input_frame,
+            text="Show",
+            variable=show_var,
+            command=lambda e=api_key_entry, v=show_var: e.config(show="" if v.get() else "●"),
+            bg="white",
+            font=("Segoe UI", 8)
+        )
+        show_check.pack(side="left", padx=(10, 0))
+        
+        # Status label
+        status_label = tk.Label(
+            content_frame,
+            text="",
+            font=("Segoe UI", 8),
+            bg="white"
+        )
+        status_label.pack(anchor="w", pady=(5, 0))
+        
+        # Buttons
+        button_frame = tk.Frame(content_frame, bg="white")
+        button_frame.pack(fill="x", pady=(10, 0))
+        
+        tk.Button(
+            button_frame,
+            text="Save",
+            command=lambda: self._save_store_key(store, api_key_entry, status_label, show_check),
+            bg="#28A745",
+            fg="white",
+            font=("Segoe UI", 9, "bold"),
+            relief="flat",
+            cursor="hand2",
+            padx=15,
+            pady=6
+        ).pack(side="left", padx=(0, 5))
+        
+        tk.Button(
+            button_frame,
+            text="Test",
+            command=lambda: self._test_store_connection(store, status_label),
+            bg="#007BFF",
+            fg="white",
+            font=("Segoe UI", 9, "bold"),
+            relief="flat",
+            cursor="hand2",
+            padx=15,
+            pady=6
+        ).pack(side="left", padx=(0, 5))
+        
+        tk.Button(
+            button_frame,
+            text="Clear",
+            command=lambda: self._clear_store_key(store, api_key_entry, status_label, show_check),
+            bg="#DC3545",
+            fg="white",
+            font=("Segoe UI", 9, "bold"),
+            relief="flat",
+            cursor="hand2",
+            padx=15,
+            pady=6
+        ).pack(side="left")
+        
+        # Store references for later use
+        self.vusion_entries[store['store_id']] = {
+            'entry': api_key_entry,
+            'status': status_label,
+            'show_var': show_var,
+            'show_check': show_check
+        }
     
     def _toggle_jira_token_visibility(self):
         """Toggle visibility of Jira API token."""
@@ -674,3 +853,221 @@ class AdminSettingsDialog:
             padx=20,
             pady=8
         ).pack(side="left")
+    
+    def _load_all_vusion_credentials(self):
+        """Load existing credentials for all stores."""
+        try:
+            from vusion_api_config import VusionAPIConfig
+            config = VusionAPIConfig()
+            
+            for store in self.vusion_stores:
+                country = store['country']
+                store_id = store['store_id']
+                
+                api_key = config.get_api_key(country, 'vusion_pro')
+                
+                if api_key and store_id in self.vusion_entries:
+                    widgets = self.vusion_entries[store_id]
+                    
+                    # Show masked key
+                    widgets['entry'].delete(0, tk.END)
+                    widgets['entry'].insert(0, '●●●●●●●●●●●●●●●●●●●●')
+                    widgets['entry'].config(state='disabled')
+                    
+                    # Hide show checkbox
+                    widgets['show_check'].pack_forget()
+                    
+                    # Update status
+                    widgets['status'].config(
+                        text="✓ API key configured (encrypted)",
+                        fg="#28A745"
+                    )
+        except Exception as e:
+            pass  # Silently fail if no config exists yet
+    
+    def _save_store_key(self, store, entry, status_label, show_check):
+        """Save API key for a specific store."""
+        api_key = entry.get().strip()
+        
+        # Check if it's the masked placeholder
+        if api_key == '●●●●●●●●●●●●●●●●●●●●':
+            messagebox.showinfo(
+                "Already Saved",
+                f"{store['name']} API key is already saved.\n\nTo update, clear it first.",
+                parent=self.dialog
+            )
+            return
+        
+        if not api_key:
+            messagebox.showerror(
+                "Validation Error",
+                "Please enter an API key.",
+                parent=self.dialog
+            )
+            return
+        
+        try:
+            from vusion_api_config import VusionAPIConfig
+            config = VusionAPIConfig()
+            
+            # Save the API key for this country
+            config.set_api_key(store['country'], 'vusion_pro', api_key)
+            
+            # Verify it was saved by reading it back
+            saved_key = config.get_api_key(store['country'], 'vusion_pro')
+            if not saved_key:
+                raise Exception("Failed to verify saved API key")
+            
+            # Mask the entry
+            entry.config(state='normal')
+            entry.delete(0, tk.END)
+            entry.insert(0, '●●●●●●●●●●●●●●●●●●●●')
+            entry.config(state='disabled')
+            
+            # Hide show checkbox
+            show_check.pack_forget()
+            
+            # Update status
+            status_label.config(
+                text="✓ API key saved successfully (encrypted)",
+                fg="#28A745"
+            )
+            
+            messagebox.showinfo(
+                "Success",
+                f"{store['name']} API key saved!\n\nThe key is encrypted and stored securely.",
+                parent=self.dialog
+            )
+            
+        except Exception as e:
+            status_label.config(
+                text=f"✗ Error: {str(e)}",
+                fg="#DC3545"
+            )
+            messagebox.showerror(
+                "Error",
+                f"Failed to save API key:\n{str(e)}",
+                parent=self.dialog
+            )
+    
+    def _test_store_connection(self, store, status_label):
+        """Test connection for a specific store."""
+        try:
+            # First verify API key exists
+            from vusion_api_config import VusionAPIConfig
+            config = VusionAPIConfig()
+            api_key = config.get_api_key(store['country'], 'vusion_pro')
+            
+            if not api_key:
+                status_label.config(
+                    text=f"✗ No API key configured",
+                    fg="#DC3545"
+                )
+                messagebox.showerror(
+                    "No API Key",
+                    f"No API key found for {store['name']} (country: {store['country']}).\n\nPlease save an API key first.",
+                    parent=self.dialog
+                )
+                return
+            
+            from vusion_api_helper import VusionAPIHelper
+            helper = VusionAPIHelper()
+            
+            status_label.config(text="⏳ Testing...", fg="#FFC107")
+            self.dialog.update()
+            
+            success, data = helper.get_store_data(store['country'], store['store_id'])
+            
+            if success:
+                # Extract transmitters from nested structure
+                transmitters = data.get('transmissionSystems', {}).get('highFrequency', {}).get('transmitters', [])
+                transmitter_count = len(transmitters)
+                online_count = sum(1 for t in transmitters 
+                                 if t.get('connectivity', {}).get('status') == 'ONLINE')
+                
+                status_label.config(
+                    text=f"✓ Connected! {transmitter_count} transmitters ({online_count} online)",
+                    fg="#28A745"
+                )
+                
+                messagebox.showinfo(
+                    "Connection Successful",
+                    f"{store['name']} connection successful!\n\n"
+                    f"Transmitters: {transmitter_count}\n"
+                    f"Online: {online_count}\n"
+                    f"Offline: {transmitter_count - online_count}",
+                    parent=self.dialog
+                )
+            else:
+                status_label.config(
+                    text=f"✗ Connection failed",
+                    fg="#DC3545"
+                )
+                messagebox.showerror(
+                    "Connection Failed",
+                    f"Failed to connect to {store['name']}:\n\n{data}",
+                    parent=self.dialog
+                )
+        
+        except ValueError as e:
+            # This catches the "No API key configured" error from get_request_headers
+            status_label.config(
+                text=f"✗ No API key configured",
+                fg="#DC3545"
+            )
+            messagebox.showerror(
+                "Configuration Error",
+                f"{str(e)}\n\nPlease save an API key for {store['name']} first.",
+                parent=self.dialog
+            )
+        except Exception as e:
+            status_label.config(
+                text=f"✗ Error: {str(e)}",
+                fg="#DC3545"
+            )
+            messagebox.showerror(
+                "Error",
+                f"Error testing {store['name']}:\n{str(e)}",
+                parent=self.dialog
+            )
+    
+    def _clear_store_key(self, store, entry, status_label, show_check):
+        """Clear API key for a specific store."""
+        result = messagebox.askyesno(
+            "Confirm Clear",
+            f"Clear API key for {store['name']}?",
+            parent=self.dialog
+        )
+        
+        if result:
+            try:
+                from vusion_api_config import VusionAPIConfig
+                config = VusionAPIConfig()
+                
+                config.delete_api_key(store['country'], 'vusion_pro')
+                
+                # Reset entry
+                entry.config(state='normal')
+                entry.delete(0, tk.END)
+                
+                # Show the checkbox again
+                show_check.pack(side="left", padx=(10, 0))
+                
+                # Update status
+                status_label.config(
+                    text="Configuration cleared",
+                    fg="#6C757D"
+                )
+                
+                messagebox.showinfo(
+                    "Cleared",
+                    f"{store['name']} API key cleared.",
+                    parent=self.dialog
+                )
+                
+            except Exception as e:
+                messagebox.showerror(
+                    "Error",
+                    f"Error clearing {store['name']} key:\n{str(e)}",
+                    parent=self.dialog
+                )

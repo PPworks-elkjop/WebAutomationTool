@@ -136,10 +136,38 @@ class DatabaseManager:
                     connectivity_provisioning TEXT,
                     connectivity_ntp_server TEXT,
                     connectivity_apc_address TEXT,
+                    vusion_display_name TEXT,
+                    vusion_creation_date TIMESTAMP,
+                    vusion_modification_date TIMESTAMP,
+                    vusion_last_offline_date TIMESTAMP,
+                    vusion_last_online_date TIMESTAMP,
+                    vusion_comment TEXT,
+                    vusion_information TEXT,
+                    vusion_status TEXT,
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )
             ''')
+            
+            # Add new Vusion columns if they don't exist (for existing databases)
+            vusion_columns = [
+                ('vusion_display_name', 'TEXT'),
+                ('vusion_creation_date', 'TIMESTAMP'),
+                ('vusion_modification_date', 'TIMESTAMP'),
+                ('vusion_last_offline_date', 'TIMESTAMP'),
+                ('vusion_last_online_date', 'TIMESTAMP'),
+                ('vusion_comment', 'TEXT'),
+                ('vusion_information', 'TEXT'),
+                ('vusion_status', 'TEXT')
+            ]
+            
+            for column_name, column_type in vusion_columns:
+                try:
+                    cursor.execute(f'ALTER TABLE access_points ADD COLUMN {column_name} {column_type}')
+                    conn.commit()
+                except sqlite3.OperationalError:
+                    # Column already exists
+                    pass
             
             # History/Events table
             cursor.execute('''
@@ -672,6 +700,63 @@ class DatabaseManager:
                 conn.commit()
         except Exception as e:
             print(f"Error updating AP status: {e}")
+    
+    def update_vusion_data(self, ap_id: str, vusion_data: Dict) -> Tuple[bool, str]:
+        """Update Vusion Manager Pro data for an AP."""
+        try:
+            updates = {}
+            
+            # Map Vusion API fields to database columns
+            if 'displayName' in vusion_data:
+                updates['vusion_display_name'] = vusion_data['displayName']
+            
+            if 'storeName' in vusion_data:
+                updates['store_alias'] = vusion_data['storeName']
+            
+            if 'creationDate' in vusion_data:
+                updates['vusion_creation_date'] = vusion_data['creationDate']
+            
+            if 'modificationDate' in vusion_data:
+                updates['vusion_modification_date'] = vusion_data['modificationDate']
+            
+            if 'macAddress' in vusion_data:
+                updates['mac_address'] = vusion_data['macAddress']
+            
+            if 'lastOfflineDate' in vusion_data:
+                updates['vusion_last_offline_date'] = vusion_data['lastOfflineDate']
+            
+            if 'lastOnlineDate' in vusion_data:
+                updates['vusion_last_online_date'] = vusion_data['lastOnlineDate']
+            
+            if 'comment' in vusion_data:
+                updates['vusion_comment'] = vusion_data['comment']
+            
+            if 'informations' in vusion_data:
+                updates['vusion_information'] = vusion_data['informations']
+            
+            # Get connectivity status from nested structure
+            if 'connectivity' in vusion_data and 'status' in vusion_data['connectivity']:
+                updates['vusion_status'] = vusion_data['connectivity']['status']
+            
+            if not updates:
+                return False, "No Vusion data to update"
+            
+            # Build UPDATE query dynamically
+            set_clause = ', '.join([f"{k} = ?" for k in updates.keys()])
+            set_clause += ', updated_at = CURRENT_TIMESTAMP'
+            values = list(updates.values()) + [ap_id]
+            
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute(f'UPDATE access_points SET {set_clause} WHERE ap_id = ?', values)
+                
+                if cursor.rowcount == 0:
+                    return False, f"AP ID {ap_id} not found"
+                
+                conn.commit()
+                return True, "Vusion data updated successfully"
+        except Exception as e:
+            return False, f"Error updating Vusion data: {str(e)}"
     
     def get_database_stats(self) -> Dict:
         """Get database statistics."""
@@ -1253,9 +1338,12 @@ class DatabaseManager:
             params = []
             
             if search_term:
-                query += ' AND (ap_id LIKE ? OR ip_address LIKE ?)'
+                query += ''' AND (ap_id LIKE ? OR ip_address LIKE ? OR mac_address LIKE ? 
+                            OR serial_number LIKE ? OR store_id LIKE ? OR store_alias LIKE ?
+                            OR retail_chain LIKE ?)'''
                 search_pattern = f'%{search_term}%'
-                params.extend([search_pattern, search_pattern])
+                params.extend([search_pattern, search_pattern, search_pattern, 
+                              search_pattern, search_pattern, search_pattern, search_pattern])
             
             if store_id:
                 query += ' AND (store_id LIKE ? OR store_alias LIKE ?)'

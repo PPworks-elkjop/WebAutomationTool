@@ -15,7 +15,7 @@ class VusionAPIConfig:
     """Manages Vusion API configurations with encrypted API keys."""
     
     # Supported countries
-    COUNTRIES = ['NO', 'SE', 'FI', 'DK', 'IS']
+    COUNTRIES = ['NO', 'SE', 'FI', 'DK', 'IS', 'LAB']
     
     # API Services
     SERVICES = {
@@ -27,6 +27,7 @@ class VusionAPIConfig:
                 'labels': '/stores/{storeId}/labels',
                 'gateways': '/stores/{storeId}/gateways',
                 'templates': '/stores/{storeId}/templates',
+                'transmitters': '/stores/{storeId}/transmitters',
             }
         },
         'vusion_cloud': {
@@ -55,6 +56,7 @@ class VusionAPIConfig:
         },
         'SE': {
             'elgiganten': 'elgiganten_se.{store_number}',
+            'elkjop': 'elkjop_se_lab.{store_number}',  # Lab environment
         },
         'FI': {
             'gigantti': 'gigantti_fi.{store_number}',
@@ -64,6 +66,9 @@ class VusionAPIConfig:
         },
         'IS': {
             'elko': 'elko_is.{store_number}',
+        },
+        'LAB': {
+            'elkjop': 'elkjop_se_lab.{store_number}',
         }
     }
     

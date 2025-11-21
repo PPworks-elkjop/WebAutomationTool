@@ -109,6 +109,7 @@ class VusionAPIHelper:
     def get_store_gateways(self, country: str, chain: str, store_number: str) -> Tuple[bool, Any]:
         """
         Get gateways for a store from Vusion Manager PRO.
+        Note: In Vusion API, APs are called 'transmitters'. Use get_transmitter_status() for AP data.
         
         Args:
             country: Country code
@@ -246,6 +247,132 @@ class VusionAPIHelper:
         
         except Exception as e:
             return False, str(e)
+    
+    def get_store_data(self, country: str, store_id: str) -> Tuple[bool, Any]:
+        """
+        Get full store data including transmitters from Vusion Manager PRO.
+        
+        Args:
+            country: Country code (e.g., 'LAB', 'SE', 'NO')
+            store_id: Store ID (e.g., 'elkjop_se_lab.lab5')
+        
+        Returns:
+            Tuple of (success: bool, data: dict or error_message: str)
+            
+            The returned data includes transmitters at:
+            data['transmissionSystems']['highFrequency']['transmitters']
+        
+        Example:
+            success, data = helper.get_store_data('LAB', 'elkjop_se_lab.lab5')
+            if success:
+                transmitters = data.get('transmissionSystems', {}).get('highFrequency', {}).get('transmitters', [])
+        """
+        try:
+            url = self.config.get_endpoint_url('vusion_pro', 'stores', storeId=store_id)
+            headers = self.config.get_request_headers(country, 'vusion_pro')
+            
+            req = urllib.request.Request(url, headers=headers)
+            req.get_method = lambda: 'GET'
+            
+            with urllib.request.urlopen(req, timeout=30) as response:
+                if response.getcode() == 200:
+                    data = json.loads(response.read().decode('utf-8'))
+                    return True, data
+                else:
+                    return False, f"HTTP {response.getcode()}"
+        
+        except urllib.error.HTTPError as e:
+            return False, f"HTTP {e.code}: {e.reason}"
+        except Exception as e:
+            return False, str(e)
+    
+    def get_transmitter_status(self, country: str, store_id: str, transmitter_id: str = None) -> Tuple[bool, Any]:
+        """
+        Get transmitter (AP) status from a store.
+        
+        Args:
+            country: Country code (e.g., 'LAB', 'SE', 'NO')
+            store_id: Store ID (e.g., 'elkjop_se_lab.lab5')
+            transmitter_id: Optional - specific transmitter ID to look for
+        
+        Returns:
+            Tuple of (success: bool, data: dict or list or error_message: str)
+            
+            If transmitter_id provided: Returns single transmitter dict or None
+            If no transmitter_id: Returns list of all transmitters
+        
+        Example:
+            # Get all transmitters
+            success, transmitters = helper.get_transmitter_status('LAB', 'elkjop_se_lab.lab5')
+            
+            # Get specific transmitter
+            success, transmitter = helper.get_transmitter_status('LAB', 'elkjop_se_lab.lab5', '201265')
+            if success and transmitter:
+                print(f"Status: {transmitter['connectivity']['status']}")
+        """
+        # Get store data
+        success, data = self.get_store_data(country, store_id)
+        
+        if not success:
+            return False, data
+        
+        # Extract transmitters from nested structure
+        transmitters = data.get('transmissionSystems', {}).get('highFrequency', {}).get('transmitters', [])
+        
+        if not transmitters:
+            return True, []
+        
+        # If specific transmitter requested
+        if transmitter_id:
+            for transmitter in transmitters:
+                if str(transmitter.get('id')) == str(transmitter_id):
+                    return True, transmitter
+            return True, None  # Not found
+        
+        # Return all transmitters
+        return True, transmitters
+    
+    def check_transmitter_online(self, country: str, store_id: str, transmitter_id: str) -> Tuple[bool, Optional[bool]]:
+        """
+        Quick check if a specific transmitter is online.
+        
+        Args:
+            country: Country code (e.g., 'SE')
+            store_id: Store ID (e.g., 'elkjop_se_lab.lab5')
+            transmitter_id: Transmitter ID (AP ID)
+        
+        Returns:
+            Tuple of (success: bool, online: bool or None)
+            - (True, True) = Successfully checked, transmitter is online
+            - (True, False) = Successfully checked, transmitter is offline
+            - (True, None) = Successfully checked, but transmitter not found
+            - (False, None) = API error
+        
+        Example:
+            success, online = helper.check_transmitter_online('SE', 'elkjop_se_lab.lab5', '201265')
+            
+            if success:
+                if online is True:
+                    print("🟢 Transmitter is ONLINE")
+                elif online is False:
+                    print("🔴 Transmitter is OFFLINE")
+                else:
+                    print("⚠️ Transmitter not found")
+        """
+        success, transmitter = self.get_transmitter_status(country, store_id, transmitter_id)
+        
+        if not success:
+            return False, None
+        
+        if transmitter is None or not isinstance(transmitter, dict):
+            return True, None  # Not found or wrong type
+        
+        # Extract online status from connectivity
+        connectivity = transmitter.get('connectivity', {})
+        status = connectivity.get('status', '').upper()
+        
+        online = status == 'ONLINE'
+        return True, online
 
 
 if __name__ == '__main__':

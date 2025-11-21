@@ -138,84 +138,177 @@ class ContentPanel:
         scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
         
         # Content inside scrollable frame
-        content = tk.Frame(scrollable_frame, bg="#FFFFFF", padx=30, pady=20)
+        content = tk.Frame(scrollable_frame, bg="#FFFFFF", padx=20, pady=15)
         content.pack(fill=tk.BOTH, expand=True)
         
-        # Header with show passwords button
+        # Header with AP ID (Jira-style)
         header_frame = tk.Frame(content, bg="#FFFFFF")
-        header_frame.pack(fill=tk.X, pady=(0, 20))
+        header_frame.pack(fill=tk.X, pady=(0, 10))
         
-        tk.Label(header_frame, text=f"All Fields - AP {ap_data['ap_id']}", font=('Segoe UI', 14, 'bold'),
-                bg="#FFFFFF", fg="#212529").pack(side=tk.LEFT)
+        tk.Label(header_frame, text=ap_data.get('ap_id', 'N/A'), font=('Segoe UI', 16, 'bold'),
+                bg="#FFFFFF", fg="#0066CC").pack(side=tk.LEFT)
         
-        # Show/Hide passwords toggle
+        # Show/Hide passwords toggle button
         self.show_passwords = tk.BooleanVar(value=False)
-        self.password_widgets = []  # Store password labels for updating
+        self.password_widgets = []
         
         def toggle_passwords():
             show = self.show_passwords.get()
             toggle_btn.config(text="🔒 Hide Passwords" if show else "👁 Show Passwords",
                             bg="#DC3545" if show else "#28A745")
-            # Update all password fields (Entry widgets)
-            for pwd_entry, pwd_value in self.password_widgets:
-                pwd_entry.config(state='normal')
-                pwd_entry.delete(0, tk.END)
+            for pwd_label, pwd_value in self.password_widgets:
                 if show:
-                    display_value = pwd_value if pwd_value and pwd_value != 'N/A' else 'N/A'
+                    pwd_label.config(text=pwd_value if pwd_value and pwd_value != 'N/A' else 'N/A')
                 else:
-                    display_value = '********' if pwd_value and pwd_value != 'N/A' else 'N/A'
-                pwd_entry.insert(0, display_value)
-                pwd_entry.config(state='readonly')
+                    pwd_label.config(text='********' if pwd_value and pwd_value != 'N/A' else 'N/A')
         
         toggle_btn = tk.Button(header_frame, text="👁 Show Passwords", 
                               command=lambda: [self.show_passwords.set(not self.show_passwords.get()), toggle_passwords()],
-                              bg="#28A745", fg="white", font=('Segoe UI', 9, 'bold'),
-                              padx=15, pady=5, relief=tk.FLAT, cursor="hand2")
-        toggle_btn.pack(side=tk.RIGHT)
+                              bg="#28A745", fg="white", font=('Segoe UI', 8, 'bold'),
+                              padx=10, pady=3, relief=tk.FLAT, cursor="hand2")
+        toggle_btn.pack(side=tk.LEFT, padx=(10, 0))
         
-        # All fields from database (including password fields)
-        all_fields = [
-            ('AP ID', 'ap_id', False),
-            ('Store ID', 'store_id', False),
-            ('Store Alias', 'store_alias', False),
-            ('Retail Chain', 'retail_chain', False),
-            ('IP Address', 'ip_address', False),
-            ('Type', 'type', False),
-            ('MAC Address', 'mac_address', False),
-            ('Serial Number', 'serial_number', False),
-            ('Software Version', 'software_version', False),
-            ('Firmware Version', 'firmware_version', False),
-            ('Hardware Revision', 'hardware_revision', False),
-            ('Build', 'build', False),
-            ('Java Version', 'java_version', False),
-            ('Configuration Mode', 'configuration_mode', False),
-            ('Service Status', 'service_status', False),
-            ('Uptime', 'uptime', False),
-            ('Communication Daemon Status', 'communication_daemon_status', False),
-            ('Connectivity Internet', 'connectivity_internet', False),
-            ('Connectivity Provisioning', 'connectivity_provisioning', False),
-            ('Connectivity NTP Server', 'connectivity_ntp_server', False),
-            ('Connectivity APC Address', 'connectivity_apc_address', False),
-            ('Status', 'status', False),
-            ('Last Seen', 'last_seen', False),
-            ('Last Ping Time', 'last_ping_time', False),
-            ('Username WebUI', 'username_webui', False),
-            ('Password WebUI', 'password_webui', True),  # Password field
-            ('Username SSH', 'username_ssh', False),
-            ('Password SSH', 'password_ssh', True),  # Password field
-            ('Notes', 'notes', False),
-            ('Created At', 'created_at', False),
-            ('Updated At', 'updated_at', False),
-        ]
+        # Store/Location info
+        store_id_full = ap_data.get('store_id', 'N/A')
+        store_number = store_id_full.split('.')[-1] if '.' in store_id_full else store_id_full
+        store_alias = ap_data.get('store_alias', 'N/A')
         
-        for label, field, is_password in all_fields:
-            value = ap_data.get(field, 'N/A')
-            if is_password:
-                # Create password row with hidden value initially
-                value_label = self._create_info_row(content, label, '********' if value and value != 'N/A' else 'N/A')
-                self.password_widgets.append((value_label, value))
-            else:
-                self._create_info_row(content, label, value)
+        location_text = f"Store {store_number}"
+        if store_alias and store_alias != 'N/A':
+            location_text += f" - {store_alias}"
+        
+        tk.Label(content, text=location_text, font=('Segoe UI', 11),
+                bg="#FFFFFF", fg="#333333", justify=tk.LEFT, anchor="w").pack(fill=tk.X, anchor="w", pady=(0, 15))
+        
+        # Main details table
+        self._create_detail_section(content, [
+            [('Type', ap_data.get('type', 'N/A')),
+             ('Retail Chain', ap_data.get('retail_chain', 'N/A'))],
+            [('Store ID', store_number),
+             ('Domain', store_id_full)],
+            [('IP Address', ap_data.get('ip_address', 'N/A')),
+             ('MAC Address', ap_data.get('mac_address', 'N/A'))],
+            [('Software', ap_data.get('software_version', 'N/A')),
+             ('Build', ap_data.get('build', 'N/A'))],
+            [('Created', ap_data.get('created_at', 'N/A')[:10] if ap_data.get('created_at') else 'N/A'),
+             ('Updated', ap_data.get('updated_at', 'N/A')[:10] if ap_data.get('updated_at') else 'N/A')]
+        ])
+        
+        # Credentials section
+        tk.Label(content, text="Credentials:", font=('Segoe UI', 10, 'bold'),
+                bg="#FFFFFF", fg="#495057").pack(anchor="w", pady=(5, 5))
+        
+        creds_frame = tk.Frame(content, bg="#F8F9FA", relief=tk.SOLID, borderwidth=1)
+        creds_frame.pack(fill=tk.X, pady=(0, 15))
+        
+        creds_container = tk.Frame(creds_frame, bg="#F8F9FA")
+        creds_container.pack(fill=tk.X, padx=10, pady=8)
+        
+        creds_container.grid_columnconfigure(0, weight=0, minsize=90)
+        creds_container.grid_columnconfigure(1, weight=1, minsize=150)
+        creds_container.grid_columnconfigure(2, weight=0, minsize=90)
+        creds_container.grid_columnconfigure(3, weight=1, minsize=150)
+        
+        # Username WebUI / Password WebUI
+        tk.Label(creds_container, text="Username WebUI:", font=('Segoe UI', 9, 'bold'),
+                bg="#F8F9FA", fg="#495057", anchor="w").grid(row=0, column=0, sticky="w", padx=(0, 5), pady=3)
+        
+        user_webui_label = tk.Label(creds_container, text=ap_data.get('username_webui', 'N/A'), 
+                font=('Segoe UI', 9), bg="#F8F9FA", fg="#212529", anchor="w", cursor="hand2")
+        user_webui_label.grid(row=0, column=1, sticky="w", padx=(0, 20), pady=3)
+        self._make_copyable(user_webui_label, ap_data.get('username_webui', 'N/A'))
+        
+        tk.Label(creds_container, text="Password WebUI:", font=('Segoe UI', 9, 'bold'),
+                bg="#F8F9FA", fg="#495057", anchor="w").grid(row=0, column=2, sticky="w", padx=(0, 5), pady=3)
+        
+        pwd_webui_value = ap_data.get('password_webui', 'N/A')
+        pwd_webui_label = tk.Label(creds_container, text='********' if pwd_webui_value and pwd_webui_value != 'N/A' else 'N/A',
+                font=('Segoe UI', 9), bg="#F8F9FA", fg="#212529", anchor="w", cursor="hand2")
+        pwd_webui_label.grid(row=0, column=3, sticky="w", padx=(0, 20), pady=3)
+        self.password_widgets.append((pwd_webui_label, pwd_webui_value))
+        self._make_copyable(pwd_webui_label, pwd_webui_value, is_password=True)
+        
+        # Username SSH / Password SSH
+        tk.Label(creds_container, text="Username SSH:", font=('Segoe UI', 9, 'bold'),
+                bg="#F8F9FA", fg="#495057", anchor="w").grid(row=1, column=0, sticky="w", padx=(0, 5), pady=3)
+        
+        user_ssh_label = tk.Label(creds_container, text=ap_data.get('username_ssh', 'N/A'),
+                font=('Segoe UI', 9), bg="#F8F9FA", fg="#212529", anchor="w", cursor="hand2")
+        user_ssh_label.grid(row=1, column=1, sticky="w", padx=(0, 20), pady=3)
+        self._make_copyable(user_ssh_label, ap_data.get('username_ssh', 'N/A'))
+        
+        tk.Label(creds_container, text="Password SSH:", font=('Segoe UI', 9, 'bold'),
+                bg="#F8F9FA", fg="#495057", anchor="w").grid(row=1, column=2, sticky="w", padx=(0, 5), pady=3)
+        
+        pwd_ssh_value = ap_data.get('password_ssh', 'N/A')
+        pwd_ssh_label = tk.Label(creds_container, text='********' if pwd_ssh_value and pwd_ssh_value != 'N/A' else 'N/A',
+                font=('Segoe UI', 9), bg="#F8F9FA", fg="#212529", anchor="w", cursor="hand2")
+        pwd_ssh_label.grid(row=1, column=3, sticky="w", padx=(0, 20), pady=3)
+        self.password_widgets.append((pwd_ssh_label, pwd_ssh_value))
+        self._make_copyable(pwd_ssh_label, pwd_ssh_value, is_password=True)
+        
+        # Vusion Manager Data
+        tk.Label(content, text="Vusion Manager Data:", font=('Segoe UI', 10, 'bold'),
+                bg="#FFFFFF", fg="#495057").pack(anchor="w", pady=(5, 5))
+        
+        self._create_detail_section(content, [
+            [('Display Name', ap_data.get('vusion_display_name', 'N/A')),
+             ('Information', ap_data.get('vusion_information', 'N/A'))],
+            [('Comment', ap_data.get('vusion_comment', 'N/A')),
+             ('Status', ap_data.get('vusion_status', 'N/A'))],
+            [('Created', ap_data.get('vusion_creation_date', 'N/A')[:19] if ap_data.get('vusion_creation_date') else 'N/A'),
+             ('Modified', ap_data.get('vusion_modification_date', 'N/A')[:19] if ap_data.get('vusion_modification_date') else 'N/A')],
+            [('Last Online', ap_data.get('vusion_last_online_date', 'N/A')[:19] if ap_data.get('vusion_last_online_date') else 'N/A'),
+             ('Last Offline', ap_data.get('vusion_last_offline_date', 'N/A')[:19] if ap_data.get('vusion_last_offline_date') else 'N/A')]
+        ])
+        
+        # Hardware & Firmware
+        tk.Label(content, text="Hardware & Firmware:", font=('Segoe UI', 10, 'bold'),
+                bg="#FFFFFF", fg="#495057").pack(anchor="w", pady=(5, 5))
+        
+        self._create_detail_section(content, [
+            [('Serial Number', ap_data.get('serial_number', 'N/A')),
+             ('HW Revision', ap_data.get('hardware_revision', 'N/A'))],
+            [('Firmware Version', ap_data.get('firmware_version', 'N/A')),
+             ('Config Mode', ap_data.get('configuration_mode', 'N/A'))]
+        ])
+        
+        # Service & Daemon
+        tk.Label(content, text="Service & Daemon:", font=('Segoe UI', 10, 'bold'),
+                bg="#FFFFFF", fg="#495057").pack(anchor="w", pady=(5, 5))
+        
+        self._create_detail_section(content, [
+            [('Service Status', ap_data.get('service_status', 'N/A')),
+             ('Uptime', ap_data.get('uptime', 'N/A'))],
+            [('Comm Daemon', ap_data.get('communication_daemon_status', 'N/A')),
+             ('Last Seen', ap_data.get('last_seen', 'N/A')[:19] if ap_data.get('last_seen') else 'N/A')]
+        ])
+        
+        # Connectivity
+        tk.Label(content, text="Connectivity:", font=('Segoe UI', 10, 'bold'),
+                bg="#FFFFFF", fg="#495057").pack(anchor="w", pady=(5, 5))
+        
+        self._create_detail_section(content, [
+            [('Internet', ap_data.get('connectivity_internet', 'N/A')),
+             ('Provisioning', ap_data.get('connectivity_provisioning', 'N/A'))],
+            [('NTP Server', ap_data.get('connectivity_ntp_server', 'N/A')),
+             ('APC Address', ap_data.get('connectivity_apc_address', 'N/A'))]
+        ])
+        
+        # Notes section (if any)
+        notes = ap_data.get('notes', '')
+        if notes and notes != 'N/A':
+            tk.Label(content, text="Notes:", font=('Segoe UI', 10, 'bold'),
+                    bg="#FFFFFF", fg="#495057").pack(anchor="w", pady=(5, 5))
+            
+            notes_frame = tk.Frame(content, bg="#F8F9FA", relief=tk.SOLID, borderwidth=1)
+            notes_frame.pack(fill=tk.X, pady=(0, 15))
+            
+            notes_text = tk.Text(notes_frame, font=('Segoe UI', 9), bg="#F8F9FA", fg="#212529",
+                               wrap=tk.WORD, height=4, relief=tk.FLAT, padx=10, pady=8)
+            notes_text.insert('1.0', notes)
+            notes_text.config(state='disabled')
+            notes_text.pack(fill=tk.X)
         
         self._log(f"Showing all fields for AP {ap_data['ap_id']} - COMPLETE")
     
@@ -1519,8 +1612,59 @@ class ContentPanel:
         else:
             self._log(f"Error: AP panel reference not set, cannot execute {operation}")
     
+    def _create_detail_section(self, parent, data):
+        """Create a Jira-style detail section with 2-column grid."""
+        frame = tk.Frame(parent, bg="#F8F9FA", relief=tk.SOLID, borderwidth=1)
+        frame.pack(fill=tk.X, pady=(0, 15))
+        
+        container = tk.Frame(frame, bg="#F8F9FA")
+        container.pack(fill=tk.X, padx=10, pady=8)
+        
+        container.grid_columnconfigure(0, weight=0, minsize=90)
+        container.grid_columnconfigure(1, weight=1, minsize=150)
+        container.grid_columnconfigure(2, weight=0, minsize=90)
+        container.grid_columnconfigure(3, weight=1, minsize=150)
+        
+        for row_idx, row_data in enumerate(data):
+            for col_idx, (label, value) in enumerate(row_data):
+                col_offset = col_idx * 2
+                
+                tk.Label(container, text=f"{label}:", font=('Segoe UI', 9, 'bold'),
+                        bg="#F8F9FA", fg="#495057", anchor="w").grid(
+                            row=row_idx, column=col_offset, sticky="w", padx=(0, 5), pady=3)
+                
+                value_str = str(value) if value else 'N/A'
+                value_label = tk.Label(container, text=value_str, font=('Segoe UI', 9),
+                        bg="#F8F9FA", fg="#212529", anchor="w", cursor="hand2")
+                value_label.grid(row=row_idx, column=col_offset+1, sticky="w", padx=(0, 20), pady=3)
+                
+                self._make_copyable(value_label, value_str)
+    
+    def _make_copyable(self, label, value, is_password=False):
+        """Make a label copyable with click and hover effects."""
+        def copy_value(e=None):
+            actual_value = value if not is_password else label['text']
+            if actual_value and actual_value != 'N/A' and actual_value != '********':
+                self.parent.clipboard_clear()
+                self.parent.clipboard_append(actual_value)
+                original_color = label['fg']
+                label.config(fg="#28A745")
+                self.parent.after(500, lambda: label.config(fg=original_color))
+        
+        label.bind("<Button-1>", copy_value)
+        
+        def on_enter(e):
+            if label['text'] != 'N/A' and label['text'] != '********':
+                label.config(fg="#0066CC")
+        
+        def on_leave(e):
+            label.config(fg="#212529")
+        
+        label.bind("<Enter>", on_enter)
+        label.bind("<Leave>", on_leave)
+    
     def _create_info_row(self, parent, label, value):
-        """Create an information row with copyable text."""
+        """Create an information row with copyable text (legacy method)."""
         row = tk.Frame(parent, bg="#FFFFFF")
         row.pack(fill=tk.X, pady=3)
         

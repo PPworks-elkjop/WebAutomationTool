@@ -100,7 +100,6 @@ class DashboardMain:
                 ("Post System Notification", self._post_notification),
                 None,
                 ("Manage AP Credentials", self._open_credentials_manager),
-                ("Manage Vusion API Keys", self._open_vusion_config),
                 ("Manage Users", self._open_user_management),
                 ("Change Password", self._change_password),
                 None,
@@ -414,7 +413,7 @@ class DashboardMain:
         """Open batch ping window (independent)."""
         try:
             from batch_ping import BatchPingWindow
-            BatchPingWindow(tk.Toplevel(), self.current_user, self.db)
+            BatchPingWindow(self.root, self.current_user, self.db)
             self.activity_log.log_message("Tools", "Opened Batch Ping", "info")
         except Exception as e:
             messagebox.showerror("Error", f"Failed to open Batch Ping: {e}")
@@ -423,7 +422,7 @@ class DashboardMain:
         """Open batch browser operations window (independent)."""
         try:
             from batch_browser import BatchBrowserWindow
-            BatchBrowserWindow(tk.Toplevel(), self.current_user, self.db)
+            BatchBrowserWindow(self.root, self.current_user, self.db)
             self.activity_log.log_message("Tools", "Opened Batch Browser", "info")
         except Exception as e:
             messagebox.showerror("Error", f"Failed to open Batch Browser: {e}")
@@ -432,7 +431,7 @@ class DashboardMain:
         """Open batch SSH operations window (independent)."""
         try:
             from batch_ssh import BatchSSHWindow
-            BatchSSHWindow(tk.Toplevel(), self.current_user, self.db)
+            BatchSSHWindow(self.root, self.current_user, self.db)
             self.activity_log.log_message("Tools", "Opened Batch SSH", "info")
         except Exception as e:
             messagebox.showerror("Error", f"Failed to open Batch SSH: {e}")
@@ -445,19 +444,6 @@ class DashboardMain:
             self.activity_log.log_message("Admin", "Opened Credentials Manager", "info")
         except Exception as e:
             messagebox.showerror("Error", f"Failed to open Credentials Manager: {e}")
-    
-    def _open_vusion_config(self):
-        """Open Vusion API configuration dialog."""
-        if not self.db.is_admin(self.username):
-            messagebox.showerror("Access Denied", "This feature is only available to administrators.")
-            return
-        try:
-            from vusion_config_dialog import VusionAPIConfigDialog
-            dialog = VusionAPIConfigDialog(self.root)
-            dialog.show()
-            self.activity_log.log_message("Admin", "Opened Vusion API Configuration", "info")
-        except Exception as e:
-            messagebox.showerror("Error", f"Failed to open Vusion API configuration:\n{str(e)}")
     
     def _open_user_management(self):
         """Open user management window."""
@@ -498,8 +484,8 @@ class DashboardMain:
             messagebox.showerror("Access Denied", "This feature is only available to administrators.")
             return
         try:
-            from audit_log_viewer import AuditLogViewer
-            AuditLogViewer(tk.Toplevel(), self.current_user, self.db)
+            from user_manager_modern import AuditLogViewer
+            AuditLogViewer(self.root, self.db)
             self.activity_log.log_message("Admin", "Opened Audit Log", "info")
         except Exception as e:
             messagebox.showerror("Error", f"Failed to open Audit Log: {e}")

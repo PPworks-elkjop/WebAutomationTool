@@ -366,7 +366,7 @@ class APSearchDialog:
         
         self.tree = ttk.Treeview(
             tree_frame,
-            columns=("ap_id", "store_id", "ip_address", "jira_count"),
+            columns=("ap_id", "store_id", "ip_address", "vg_status", "jira_count"),
             show="headings",
             yscrollcommand=vsb.set,
             xscrollcommand=hsb.set,
@@ -380,12 +380,14 @@ class APSearchDialog:
         self.tree.heading("ap_id", text="AP-ID ▼", command=lambda: self._sort_by_column("ap_id"))
         self.tree.heading("store_id", text="Store ID", command=lambda: self._sort_by_column("store_id"))
         self.tree.heading("ip_address", text="IP", command=lambda: self._sort_by_column("ip_address"))
+        self.tree.heading("vg_status", text="VG STS", command=lambda: self._sort_by_column("vg_status"))
         self.tree.heading("jira_count", text="# Jira", command=lambda: self._sort_by_column("jira_count"))
         
-        self.tree.column("ap_id", width=280, anchor="w")
-        self.tree.column("store_id", width=180, anchor="center")
-        self.tree.column("ip_address", width=220, anchor="center")
-        self.tree.column("jira_count", width=180, anchor="center")
+        self.tree.column("ap_id", width=250, minwidth=200, anchor="w")
+        self.tree.column("store_id", width=150, minwidth=100, anchor="center")
+        self.tree.column("ip_address", width=180, minwidth=120, anchor="center")
+        self.tree.column("vg_status", width=120, minwidth=80, anchor="center")
+        self.tree.column("jira_count", width=100, minwidth=80, anchor="center")
         
         # Grid layout
         self.tree.grid(row=0, column=0, sticky="nsew")
@@ -417,6 +419,177 @@ class APSearchDialog:
                  bg="#28A745", fg="white", cursor="hand2", padx=30, pady=10,
                  font=("Segoe UI", 10, "bold"), relief="flat", bd=0,
                  activebackground="#218838").pack(side="right")
+        
+        # Configure tags for Vusion status colors
+        self.tree.tag_configure('vg_online', foreground='#28A745')  # Green
+        self.tree.tag_configure('vg_offline', foreground='#DC3545')  # Red
+    
+    def _load_vusion_status_thread(self, aps: List[Dict]):
+        """Background thread to load Vusion status for all APs."""
+        # Group APs by store to minimize API calls
+        stores_dict = {}
+        for ap in aps:
+            store_id = ap.get('store_id', '')
+            if store_id:
+                if store_id not in stores_dict:
+                    stores_dict[store_id] = []
+                stores_dict[store_id].append(ap)
+        
+        # Load status for each store
+        for store_id, store_aps in stores_dict.items():
+            try:
+                # Parse country from store_id
+                country = self._get_country_from_store_id(store_id)
+                if not country:
+                    continue
+                
+                # Check if API key is configured for this country
+                from vusion_api_config import VusionAPIConfig
+                config = VusionAPIConfig()
+                api_key = config.get_api_key(country, 'vusion_pro')
+                
+                if not api_key:
+                    # No key configured, clear loading indicator
+                    for ap in store_aps:
+                        self._update_vusion_status_ui(ap['ap_id'], '', None)
+                    continue
+                
+                # Get all transmitters for this store (single API call)
+                from vusion_api_helper import VusionAPIHelper
+                helper = VusionAPIHelper()
+                success, transmitters = helper.get_transmitter_status(country, store_id)
+                
+                if success and transmitters:
+                    # Create lookup dict by transmitter ID
+                    transmitter_dict = {str(t.get('id')): t for t in transmitters}
+                    
+                    # Update status for each AP
+                    for ap in store_aps:
+                        ap_id = ap.get('ap_id', '')
+                        if ap_id in transmitter_dict:
+                            transmitter = transmitter_dict[ap_id]
+                            status = transmitter.get('connectivity', {}).get('status', '')
+                            if status == 'ONLINE':
+                                self._update_vusion_status_ui(ap_id, 'ONLINE', 'vg_online')
+                            elif status == 'OFFLINE':
+                                self._update_vusion_status_ui(ap_id, 'OFFLINE', 'vg_offline')
+                            else:
+                                self._update_vusion_status_ui(ap_id, status, None)
+                        else:
+                            # AP not found in Vusion
+                            self._update_vusion_status_ui(ap_id, '', None)
+                else:
+                    # Error or no transmitters, clear loading indicator
+                    for ap in store_aps:
+                        self._update_vusion_status_ui(ap['ap_id'], '', None)
+            except Exception:
+                # Silently fail for this store
+                for ap in store_aps:
+                    self._update_vusion_status_ui(ap['ap_id'], '', None)
+    
+    def _update_vusion_status_ui(self, ap_id: str, status_text: str, tag_name: Optional[str]):
+        """Update Vusion status in tree (called from background thread)."""
+        try:
+            # Find the tree item by AP ID
+            for item in self.tree.get_children():
+                item_tags = self.tree.item(item, 'tags')
+                if item_tags and ap_id in item_tags:
+                    # Get current values
+                    values = list(self.tree.item(item, 'values'))
+                    # Update VG STS column (index 3)
+                    values[3] = status_text
+                    
+                    # Update values and tags
+                    new_tags = [ap_id]
+                    if tag_name:
+                        new_tags.append(tag_name)
+                    
+                    self.tree.item(item, values=tuple(values), tags=tuple(new_tags))
+                    break
+        except Exception:
+            pass  # Silently fail if tree item doesn't exist anymore
+    
+    def _get_vusion_status(self, ap_id: str, store_id: str) -> tuple:
+        """
+        Get Vusion status for an AP (synchronous - for backward compatibility).
+        
+        Returns:
+            Tuple of (status_text, tag_name)
+            - ("ONLINE", "vg_online") if online
+            - ("OFFLINE", "vg_offline") if offline
+            - ("", None) if no key configured or error
+        """
+        if not ap_id or not store_id:
+            return ("", None)
+        
+        try:
+            # Parse country from store_id
+            country = self._get_country_from_store_id(store_id)
+            if not country:
+                return ("", None)
+            
+            # Check if API key is configured for this country
+            from vusion_api_config import VusionAPIConfig
+            config = VusionAPIConfig()
+            api_key = config.get_api_key(country, 'vusion_pro')
+            
+            if not api_key:
+                # No key configured, don't show anything
+                return ("", None)
+            
+            # Get transmitter status
+            from vusion_api_helper import VusionAPIHelper
+            helper = VusionAPIHelper()
+            success, transmitter = helper.get_transmitter_status(country, store_id, ap_id)
+            
+            if success and transmitter:
+                status = transmitter.get('connectivity', {}).get('status', '')
+                if status == 'ONLINE':
+                    return ("ONLINE", "vg_online")
+                elif status == 'OFFLINE':
+                    return ("OFFLINE", "vg_offline")
+                else:
+                    return (status, None)
+            else:
+                # AP not found in Vusion or error
+                return ("", None)
+        except Exception:
+            # Silently fail - don't show status if there's any error
+            return ("", None)
+    
+    def _get_country_from_store_id(self, store_id: str) -> Optional[str]:
+        """
+        Parse country code from store_id.
+        
+        Examples:
+            elkjop_no.1234 -> NO
+            elgiganten_se.5678 -> SE
+            gigantti_fi.4010 -> FI
+            elgiganten_dk.9012 -> DK
+            elkjop_se_lab.lab5 -> LAB
+        """
+        if not store_id:
+            return None
+        
+        store_lower = store_id.lower()
+        
+        # Check for lab environment first
+        if 'elkjop_se_lab' in store_lower:
+            return 'LAB'
+        
+        # Parse country from store_id pattern
+        if '_no' in store_lower:
+            return 'NO'
+        elif '_se' in store_lower:
+            return 'SE'
+        elif '_fi' in store_lower:
+            return 'FI'
+        elif '_dk' in store_lower:
+            return 'DK'
+        elif '_is' in store_lower:
+            return 'IS'
+        
+        return None
     
     def _sort_by_column(self, col):
         """Sort treeview by column."""
@@ -452,6 +625,7 @@ class APSearchDialog:
                 'ap_id': 'AP-ID',
                 'store_id': 'Store ID',
                 'ip_address': 'IP',
+                'vg_status': 'VG STS',
                 'jira_count': '# Jira'
             }.get(column, column)
             
@@ -486,7 +660,7 @@ class APSearchDialog:
             has_open_tickets=has_open_tickets
         )
         
-        # Populate results
+        # Populate results (without Vusion status initially)
         for ap in aps:
             # Count open tickets
             open_tickets = self._count_open_tickets(ap['ap_id'])
@@ -495,10 +669,16 @@ class APSearchDialog:
                 ap.get('ap_id', ''),
                 ap.get('store_id', ''),
                 ap.get('ip_address', ''),
+                '...',  # Placeholder while loading
                 str(open_tickets) if open_tickets > 0 else '0'
             ), tags=(ap['ap_id'],))
         
         self.count_label.config(text=f"{len(aps)} AP(s) found")
+        
+        # Load Vusion status in background thread
+        if aps:
+            thread = threading.Thread(target=self._load_vusion_status_thread, args=(aps,), daemon=True)
+            thread.start()
         
         # Reset sort indicator
         if not self.sort_column:

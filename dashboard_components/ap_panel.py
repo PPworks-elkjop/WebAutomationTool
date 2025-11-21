@@ -145,7 +145,7 @@ class APPanel:
         # Treeview
         self.search_results = ttk.Treeview(
             list_frame,
-            columns=("ap_id", "store_id", "ip_address", "jira_count"),
+            columns=("ap_id", "store_id", "ip_address", "vg_status", "jira_count"),
             show="headings",
             yscrollcommand=vsb.set,
             xscrollcommand=hsb.set,
@@ -160,12 +160,14 @@ class APPanel:
         self.search_results.heading("ap_id", text="AP-ID", anchor="w", command=lambda: self._sort_search_results("ap_id"))
         self.search_results.heading("store_id", text="Store ID", anchor="w", command=lambda: self._sort_search_results("store_id"))
         self.search_results.heading("ip_address", text="IP", anchor="w", command=lambda: self._sort_search_results("ip_address"))
+        self.search_results.heading("vg_status", text="VG STS", anchor="w", command=lambda: self._sort_search_results("vg_status"))
         self.search_results.heading("jira_count", text="# Jira", anchor="w", command=lambda: self._sort_search_results("jira_count"))
         
-        self.search_results.column("ap_id", width=150, anchor="w")
-        self.search_results.column("store_id", width=100, anchor="w")
-        self.search_results.column("ip_address", width=120, anchor="w")
-        self.search_results.column("jira_count", width=80, anchor="w")
+        self.search_results.column("ap_id", width=140, minwidth=100, anchor="w")
+        self.search_results.column("store_id", width=100, minwidth=80, anchor="w")
+        self.search_results.column("ip_address", width=100, minwidth=80, anchor="w")
+        self.search_results.column("vg_status", width=80, minwidth=60, anchor="w")
+        self.search_results.column("jira_count", width=60, minwidth=50, anchor="w")
         
         # Grid layout
         self.search_results.grid(row=0, column=0, sticky="nsew")
@@ -176,6 +178,10 @@ class APPanel:
         list_frame.grid_columnconfigure(0, weight=1)
         
         self.search_results.bind('<Double-Button-1>', lambda e: self._open_selected_ap())
+        
+        # Configure tags for Vusion status colors
+        self.search_results.tag_configure('vg_online', foreground='#28A745')  # Green
+        self.search_results.tag_configure('vg_offline', foreground='#DC3545')  # Red
         
         # Store AP data for results and sort state
         self.search_ap_data = []
@@ -262,13 +268,14 @@ class APPanel:
                 if include_jira:
                     self._log(f"Found {len(results)} APs, fetching Jira data in background...")
                     
-                    # Display results immediately without Jira counts
+                    # Display results immediately without Jira counts and Vusion status
                     for ap in results:
                         self.search_results.insert("", "end", values=(
                             ap['ap_id'],
                             ap.get('store_id', 'N/A'),
                             ap.get('ip_address', 'N/A'),
-                            '...'  # Placeholder while loading
+                            '...',  # VG STS placeholder
+                            '...'   # Jira count placeholder
                         ), tags=(ap['ap_id'],))
                         self.search_ap_data.append(ap)
                     
@@ -339,17 +346,23 @@ class APPanel:
                 else:
                     self._log(f"Found {len(results)} APs (Jira lookup skipped)")
                     
-                    # Display results without Jira counts
+                    # Display results without Jira counts but with Vusion placeholder
                     for ap in results:
                         self.search_results.insert("", "end", values=(
                             ap['ap_id'],
                             ap.get('store_id', 'N/A'),
                             ap.get('ip_address', 'N/A'),
+                            '...',  # VG STS placeholder
                             '0'
                         ), tags=(ap['ap_id'],))
                         self.search_ap_data.append(ap)
+                
+                # Load Vusion status in background (whether Jira is enabled or not)
+                if results:
+                    threading.Thread(target=self._load_vusion_status_thread, args=(results,), daemon=True).start()
+                    
             else:
-                self.search_results.insert("", "end", values=("No results found", "", "", ""))
+                self.search_results.insert("", "end", values=("No results found", "", "", "", ""))
                 self._log(f"No APs found for '{search_term}'")
                 
         except Exception as e:
@@ -364,10 +377,119 @@ class APPanel:
                 ap_id = tags[0]
                 if ap_id in jira_counts:
                     values = list(self.search_results.item(item, "values"))
-                    values[3] = str(jira_counts[ap_id])
+                    values[4] = str(jira_counts[ap_id])  # Index 4 is jira_count now
                     self.search_results.item(item, values=values)
         
         self._log(f"Jira data loaded for {len(jira_counts)} APs")
+    
+    def _load_vusion_status_thread(self, aps):
+        """Background thread to load Vusion status for all APs."""
+        # Group APs by store to minimize API calls
+        stores_dict = {}
+        for ap in aps:
+            store_id = ap.get('store_id', '')
+            if store_id and store_id != 'N/A':
+                if store_id not in stores_dict:
+                    stores_dict[store_id] = []
+                stores_dict[store_id].append(ap)
+        
+        # Load status for each store
+        for store_id, store_aps in stores_dict.items():
+            try:
+                # Parse country from store_id
+                country = self._get_country_from_store_id(store_id)
+                if not country:
+                    continue
+                
+                # Check if API key is configured for this country
+                from vusion_api_config import VusionAPIConfig
+                config = VusionAPIConfig()
+                api_key = config.get_api_key(country, 'vusion_pro')
+                
+                if not api_key:
+                    # No key configured, clear loading indicator
+                    for ap in store_aps:
+                        self.parent.after(0, lambda aid=ap['ap_id']: self._update_vusion_status_ui(aid, '', None))
+                    continue
+                
+                # Get all transmitters for this store (single API call)
+                from vusion_api_helper import VusionAPIHelper
+                helper = VusionAPIHelper()
+                success, transmitters = helper.get_transmitter_status(country, store_id)
+                
+                if success and transmitters:
+                    # Create lookup dict by transmitter ID
+                    transmitter_dict = {str(t.get('id')): t for t in transmitters}
+                    
+                    # Update status for each AP
+                    for ap in store_aps:
+                        ap_id = ap.get('ap_id', '')
+                        if ap_id in transmitter_dict:
+                            transmitter = transmitter_dict[ap_id]
+                            status = transmitter.get('connectivity', {}).get('status', '')
+                            if status == 'ONLINE':
+                                self.parent.after(0, lambda aid=ap_id: self._update_vusion_status_ui(aid, 'ONLINE', 'vg_online'))
+                            elif status == 'OFFLINE':
+                                self.parent.after(0, lambda aid=ap_id: self._update_vusion_status_ui(aid, 'OFFLINE', 'vg_offline'))
+                            else:
+                                self.parent.after(0, lambda aid=ap_id, s=status: self._update_vusion_status_ui(aid, s, None))
+                        else:
+                            # AP not found in Vusion
+                            self.parent.after(0, lambda aid=ap_id: self._update_vusion_status_ui(aid, '', None))
+                else:
+                    # Error or no transmitters, clear loading indicator
+                    for ap in store_aps:
+                        self.parent.after(0, lambda aid=ap['ap_id']: self._update_vusion_status_ui(aid, '', None))
+            except Exception:
+                # Silently fail for this store
+                for ap in store_aps:
+                    self.parent.after(0, lambda aid=ap['ap_id']: self._update_vusion_status_ui(aid, '', None))
+    
+    def _update_vusion_status_ui(self, ap_id, status_text, tag_name):
+        """Update Vusion status in tree (called from main thread via after())."""
+        try:
+            for item in self.search_results.get_children():
+                item_tags = self.search_results.item(item, 'tags')
+                if item_tags and ap_id in item_tags:
+                    # Get current values
+                    values = list(self.search_results.item(item, 'values'))
+                    # Update VG STS column (index 3)
+                    values[3] = status_text
+                    
+                    # Update values and tags
+                    new_tags = [ap_id]
+                    if tag_name:
+                        new_tags.append(tag_name)
+                    
+                    self.search_results.item(item, values=tuple(values), tags=tuple(new_tags))
+                    break
+        except Exception:
+            pass  # Silently fail if tree item doesn't exist anymore
+    
+    def _get_country_from_store_id(self, store_id):
+        """Parse country code from store_id."""
+        if not store_id:
+            return None
+        
+        store_lower = store_id.lower()
+        
+        # Check for lab environment first
+        if 'elkjop_se_lab' in store_lower:
+            return 'LAB'
+        
+        # Parse country from store_id pattern
+        if '_no' in store_lower:
+            return 'NO'
+        elif '_se' in store_lower:
+            return 'SE'
+        elif '_fi' in store_lower:
+            return 'FI'
+        elif '_dk' in store_lower:
+            return 'DK'
+        elif '_is' in store_lower:
+            return 'IS'
+        
+        return None
     
     def _sort_search_results(self, col):
         """Sort search results by column."""
@@ -539,35 +661,345 @@ class APPanel:
         content = tk.Frame(scrollable_frame, bg="#FFFFFF", padx=20, pady=15)
         content.pack(fill=tk.BOTH, expand=True)
         
-        # AP ID row
-        header_row = tk.Frame(content, bg="#FFFFFF")
-        header_row.pack(fill=tk.X, pady=(0, 20))
+        # Header with AP ID (like Jira ticket key)
+        header_frame = tk.Frame(content, bg="#FFFFFF")
+        header_frame.pack(fill=tk.X, pady=(0, 10))
         
-        tk.Label(header_row, text="AP ID:", font=('Segoe UI', 11, 'bold'),
+        # AP-ID: label and value
+        tk.Label(header_frame, text="AP-ID:", font=('Segoe UI', 16, 'bold'),
                 bg="#FFFFFF", fg="#495057").pack(side=tk.LEFT)
         
-        ap_id_entry = tk.Entry(header_row, font=('Segoe UI', 11),
-                              bd=0, relief=tk.FLAT, highlightthickness=0)
-        ap_id_entry.insert(0, ap_data.get('ap_id', 'N/A'))
-        ap_id_entry.config(state='readonly', readonlybackground="#FFFFFF", fg="#212529")
-        ap_id_entry.pack(side=tk.LEFT, padx=(10, 20))
+        tk.Label(header_frame, text=ap_data.get('ap_id', 'N/A'), font=('Segoe UI', 16, 'bold'),
+                bg="#FFFFFF", fg="#0066CC").pack(side=tk.LEFT, padx=(8, 0))
         
-        # Extract store number from store_id (e.g., "elgiganten_se.2001" -> "2001")
+        # VG Status badge on same row, aligned right
+        status_badge = tk.Label(header_frame, text="Loading...", 
+                               font=('Segoe UI', 8, 'bold'),
+                               bg="#6C757D", fg="white",
+                               padx=8, pady=3)
+        status_badge.pack(side=tk.RIGHT)
+        ap_data['overview_status_label'] = status_badge
+        
+        # Store/Location info (like Jira summary)
         store_id_full = ap_data.get('store_id', 'N/A')
         store_number = store_id_full.split('.')[-1] if '.' in store_id_full else store_id_full
+        store_alias = ap_data.get('store_alias', 'N/A')
         
-        # Info fields with copyable entries
-        info_fields = [
-            ('Store ID', store_number),
-            ('Retail Domain', store_id_full),
-            ('IP Address', ap_data.get('ip_address', 'N/A')),
-            ('MAC Address', ap_data.get('mac_address', 'N/A')),
-            ('Software Version', ap_data.get('software_version', 'N/A')),
-            ('Build', ap_data.get('build', 'N/A')),
+        location_text = f"Store {store_number}"
+        if store_alias and store_alias != 'N/A':
+            location_text += f" - {store_alias}"
+        
+        location_label = tk.Label(content, text=location_text, font=('Segoe UI', 11),
+                bg="#FFFFFF", fg="#333333", justify=tk.LEFT, anchor="w")
+        location_label.pack(fill=tk.X, anchor="w", pady=(0, 15))
+        
+        # Compact details table (Jira-style) with 2 columns
+        details_frame = tk.Frame(content, bg="#F8F9FA", relief=tk.SOLID, borderwidth=1)
+        details_frame.pack(fill=tk.X, pady=(0, 15))
+        
+        details_data = [
+            [('Type', ap_data.get('type', 'N/A')),
+             ('Retail Chain', ap_data.get('retail_chain', 'N/A'))],
+            [('Store ID', store_number),
+             ('Domain', store_id_full)],
+            [('IP Address', ap_data.get('ip_address', 'N/A')),
+             ('MAC Address', ap_data.get('mac_address', 'N/A'))],
+            [('Software', ap_data.get('software_version', 'N/A')),
+             ('Build', ap_data.get('build', 'N/A'))],
+            [('Created', ap_data.get('created_at', 'N/A')[:10] if ap_data.get('created_at') else 'N/A'),
+             ('Updated', ap_data.get('updated_at', 'N/A')[:10] if ap_data.get('updated_at') else 'N/A')]
         ]
         
-        for label, value in info_fields:
-            self._create_copyable_field(content, label, value)
+        # Use grid layout for stable columns (like Jira)
+        table_container = tk.Frame(details_frame, bg="#F8F9FA")
+        table_container.pack(fill=tk.X, padx=10, pady=8)
+        
+        # Configure column weights
+        table_container.grid_columnconfigure(0, weight=0, minsize=90)  # Label 1
+        table_container.grid_columnconfigure(1, weight=1, minsize=150)  # Value 1
+        table_container.grid_columnconfigure(2, weight=0, minsize=90)  # Label 2
+        table_container.grid_columnconfigure(3, weight=1, minsize=150)  # Value 2
+        
+        for row_idx, row_data in enumerate(details_data):
+            for col_idx, (label, value) in enumerate(row_data):
+                col_offset = col_idx * 2
+                
+                # Label
+                tk.Label(table_container, text=f"{label}:", font=('Segoe UI', 9, 'bold'),
+                        bg="#F8F9FA", fg="#495057", anchor="w").grid(
+                            row=row_idx, column=col_offset, sticky="w", padx=(0, 5), pady=3)
+                
+                # Value (clickable to copy)
+                value_str = str(value) if value else 'N/A'
+                value_label = tk.Label(table_container, text=value_str, font=('Segoe UI', 9),
+                        bg="#F8F9FA", fg="#212529", anchor="w", cursor="hand2")
+                value_label.grid(row=row_idx, column=col_offset+1, sticky="w", padx=(0, 20), pady=3)
+                
+                # Click to copy
+                def make_copy_func(v):
+                    def copy_value(e=None, lbl=value_label, val=v):
+                        if val != 'N/A':
+                            self.parent.clipboard_clear()
+                            self.parent.clipboard_append(val)
+                            lbl.config(fg="#28A745")
+                            self.parent.after(500, lambda: lbl.config(fg="#212529"))
+                    return copy_value
+                
+                value_label.bind("<Button-1>", make_copy_func(value_str))
+                
+                # Hover effect
+                def make_hover_func(lbl):
+                    def on_enter(e):
+                        if lbl['text'] != 'N/A':
+                            lbl.config(fg="#0066CC")
+                    def on_leave(e):
+                        lbl.config(fg="#212529")
+                    return on_enter, on_leave
+                
+                enter_func, leave_func = make_hover_func(value_label)
+                value_label.bind("<Enter>", enter_func)
+                value_label.bind("<Leave>", leave_func)
+        
+        # Vusion Manager Data section
+        tk.Label(content, text="Vusion Manager Data:", font=('Segoe UI', 10, 'bold'),
+                bg="#FFFFFF", fg="#495057").pack(anchor="w", pady=(5, 5))
+        
+        vusion_frame = tk.Frame(content, bg="#F8F9FA", relief=tk.SOLID, borderwidth=1)
+        vusion_frame.pack(fill=tk.X, pady=(0, 15))
+        
+        vusion_data = [
+            [('Display Name', ap_data.get('vusion_display_name', 'N/A')),
+             ('Information', ap_data.get('vusion_information', 'N/A'))],
+            [('Comment', ap_data.get('vusion_comment', 'N/A')),
+             ('Status', ap_data.get('vusion_status', 'N/A'))],
+            [('Created', ap_data.get('vusion_creation_date', 'N/A')[:19] if ap_data.get('vusion_creation_date') else 'N/A'),
+             ('Modified', ap_data.get('vusion_modification_date', 'N/A')[:19] if ap_data.get('vusion_modification_date') else 'N/A')],
+            [('Last Online', ap_data.get('vusion_last_online_date', 'N/A')[:19] if ap_data.get('vusion_last_online_date') else 'N/A'),
+             ('Last Offline', ap_data.get('vusion_last_offline_date', 'N/A')[:19] if ap_data.get('vusion_last_offline_date') else 'N/A')]
+        ]
+        
+        vusion_container = tk.Frame(vusion_frame, bg="#F8F9FA")
+        vusion_container.pack(fill=tk.X, padx=10, pady=8)
+        
+        # Configure column weights
+        vusion_container.grid_columnconfigure(0, weight=0, minsize=90)
+        vusion_container.grid_columnconfigure(1, weight=1, minsize=150)
+        vusion_container.grid_columnconfigure(2, weight=0, minsize=90)
+        vusion_container.grid_columnconfigure(3, weight=1, minsize=150)
+        
+        for row_idx, row_data in enumerate(vusion_data):
+            for col_idx, (label, value) in enumerate(row_data):
+                col_offset = col_idx * 2
+                
+                # Label
+                tk.Label(vusion_container, text=f"{label}:", font=('Segoe UI', 9, 'bold'),
+                        bg="#F8F9FA", fg="#495057", anchor="w").grid(
+                            row=row_idx, column=col_offset, sticky="w", padx=(0, 5), pady=3)
+                
+                # Value (clickable to copy)
+                value_str = str(value) if value else 'N/A'
+                value_label = tk.Label(vusion_container, text=value_str, font=('Segoe UI', 9),
+                        bg="#F8F9FA", fg="#212529", anchor="w", cursor="hand2")
+                value_label.grid(row=row_idx, column=col_offset+1, sticky="w", padx=(0, 20), pady=3)
+                
+                # Click to copy
+                def make_copy_func_v(v):
+                    def copy_value(e=None, lbl=value_label, val=v):
+                        if val != 'N/A':
+                            self.parent.clipboard_clear()
+                            self.parent.clipboard_append(val)
+                            lbl.config(fg="#28A745")
+                            self.parent.after(500, lambda: lbl.config(fg="#212529"))
+                    return copy_value
+                
+                value_label.bind("<Button-1>", make_copy_func_v(value_str))
+                
+                # Hover effect
+                def make_hover_func_v(lbl):
+                    def on_enter(e):
+                        if lbl['text'] != 'N/A':
+                            lbl.config(fg="#0066CC")
+                    def on_leave(e):
+                        lbl.config(fg="#212529")
+                    return on_enter, on_leave
+                
+                enter_func, leave_func = make_hover_func_v(value_label)
+                value_label.bind("<Enter>", enter_func)
+                value_label.bind("<Leave>", leave_func)
+        
+        # Hardware & Firmware section
+        tk.Label(content, text="Hardware & Firmware:", font=('Segoe UI', 10, 'bold'),
+                bg="#FFFFFF", fg="#495057").pack(anchor="w", pady=(10, 5))
+        
+        hw_fw_frame = tk.Frame(content, bg="#F8F9FA", relief=tk.SOLID, borderwidth=1)
+        hw_fw_frame.pack(fill=tk.X, pady=(0, 15))
+        
+        hw_fw_data = [
+            [('Serial Number', ap_data.get('serial_number', 'N/A')),
+             ('HW Revision', ap_data.get('hardware_revision', 'N/A'))],
+            [('Firmware Version', ap_data.get('firmware_version', 'N/A')),
+             ('Config Mode', ap_data.get('configuration_mode', 'N/A'))]
+        ]
+        
+        hw_fw_container = tk.Frame(hw_fw_frame, bg="#F8F9FA")
+        hw_fw_container.pack(fill=tk.X, padx=10, pady=8)
+        
+        hw_fw_container.grid_columnconfigure(0, weight=0, minsize=90)
+        hw_fw_container.grid_columnconfigure(1, weight=1, minsize=150)
+        hw_fw_container.grid_columnconfigure(2, weight=0, minsize=90)
+        hw_fw_container.grid_columnconfigure(3, weight=1, minsize=150)
+        
+        for row_idx, row_data in enumerate(hw_fw_data):
+            for col_idx, (label, value) in enumerate(row_data):
+                col_offset = col_idx * 2
+                
+                tk.Label(hw_fw_container, text=f"{label}:", font=('Segoe UI', 9, 'bold'),
+                        bg="#F8F9FA", fg="#495057", anchor="w").grid(
+                            row=row_idx, column=col_offset, sticky="w", padx=(0, 5), pady=3)
+                
+                value_str = str(value) if value else 'N/A'
+                value_label = tk.Label(hw_fw_container, text=value_str, font=('Segoe UI', 9),
+                        bg="#F8F9FA", fg="#212529", anchor="w", cursor="hand2")
+                value_label.grid(row=row_idx, column=col_offset+1, sticky="w", padx=(0, 20), pady=3)
+                
+                def make_copy(v, lbl):
+                    def copy_value(e=None):
+                        if v != 'N/A':
+                            self.parent.clipboard_clear()
+                            self.parent.clipboard_append(v)
+                            lbl.config(fg="#28A745")
+                            self.parent.after(500, lambda: lbl.config(fg="#212529"))
+                    return copy_value
+                
+                value_label.bind("<Button-1>", make_copy(value_str, value_label))
+                
+                def make_hover(lbl):
+                    def on_enter(e):
+                        if lbl['text'] != 'N/A':
+                            lbl.config(fg="#0066CC")
+                    def on_leave(e):
+                        lbl.config(fg="#212529")
+                    return on_enter, on_leave
+                
+                enter_func, leave_func = make_hover(value_label)
+                value_label.bind("<Enter>", enter_func)
+                value_label.bind("<Leave>", leave_func)
+        
+        # Service & Daemon section
+        tk.Label(content, text="Service & Daemon:", font=('Segoe UI', 10, 'bold'),
+                bg="#FFFFFF", fg="#495057").pack(anchor="w", pady=(5, 5))
+        
+        service_frame = tk.Frame(content, bg="#F8F9FA", relief=tk.SOLID, borderwidth=1)
+        service_frame.pack(fill=tk.X, pady=(0, 15))
+        
+        service_data = [
+            [('Service Status', ap_data.get('service_status', 'N/A')),
+             ('Uptime', ap_data.get('uptime', 'N/A'))],
+            [('Comm Daemon', ap_data.get('communication_daemon_status', 'N/A')),
+             ('Last Seen', ap_data.get('last_seen', 'N/A')[:19] if ap_data.get('last_seen') else 'N/A')]
+        ]
+        
+        service_container = tk.Frame(service_frame, bg="#F8F9FA")
+        service_container.pack(fill=tk.X, padx=10, pady=8)
+        
+        service_container.grid_columnconfigure(0, weight=0, minsize=90)
+        service_container.grid_columnconfigure(1, weight=1, minsize=150)
+        service_container.grid_columnconfigure(2, weight=0, minsize=90)
+        service_container.grid_columnconfigure(3, weight=1, minsize=150)
+        
+        for row_idx, row_data in enumerate(service_data):
+            for col_idx, (label, value) in enumerate(row_data):
+                col_offset = col_idx * 2
+                
+                tk.Label(service_container, text=f"{label}:", font=('Segoe UI', 9, 'bold'),
+                        bg="#F8F9FA", fg="#495057", anchor="w").grid(
+                            row=row_idx, column=col_offset, sticky="w", padx=(0, 5), pady=3)
+                
+                value_str = str(value) if value else 'N/A'
+                value_label = tk.Label(service_container, text=value_str, font=('Segoe UI', 9),
+                        bg="#F8F9FA", fg="#212529", anchor="w", cursor="hand2")
+                value_label.grid(row=row_idx, column=col_offset+1, sticky="w", padx=(0, 20), pady=3)
+                
+                def make_copy2(v, lbl):
+                    def copy_value(e=None):
+                        if v != 'N/A':
+                            self.parent.clipboard_clear()
+                            self.parent.clipboard_append(v)
+                            lbl.config(fg="#28A745")
+                            self.parent.after(500, lambda: lbl.config(fg="#212529"))
+                    return copy_value
+                
+                value_label.bind("<Button-1>", make_copy2(value_str, value_label))
+                
+                def make_hover2(lbl):
+                    def on_enter(e):
+                        if lbl['text'] != 'N/A':
+                            lbl.config(fg="#0066CC")
+                    def on_leave(e):
+                        lbl.config(fg="#212529")
+                    return on_enter, on_leave
+                
+                enter_func, leave_func = make_hover2(value_label)
+                value_label.bind("<Enter>", enter_func)
+                value_label.bind("<Leave>", leave_func)
+        
+        # Connectivity section
+        tk.Label(content, text="Connectivity:", font=('Segoe UI', 10, 'bold'),
+                bg="#FFFFFF", fg="#495057").pack(anchor="w", pady=(5, 5))
+        
+        conn_frame = tk.Frame(content, bg="#F8F9FA", relief=tk.SOLID, borderwidth=1)
+        conn_frame.pack(fill=tk.X, pady=(0, 15))
+        
+        conn_data = [
+            [('Internet', ap_data.get('connectivity_internet', 'N/A')),
+             ('Provisioning', ap_data.get('connectivity_provisioning', 'N/A'))],
+            [('NTP Server', ap_data.get('connectivity_ntp_server', 'N/A')),
+             ('APC Address', ap_data.get('connectivity_apc_address', 'N/A'))]
+        ]
+        
+        conn_container = tk.Frame(conn_frame, bg="#F8F9FA")
+        conn_container.pack(fill=tk.X, padx=10, pady=8)
+        
+        conn_container.grid_columnconfigure(0, weight=0, minsize=90)
+        conn_container.grid_columnconfigure(1, weight=1, minsize=150)
+        conn_container.grid_columnconfigure(2, weight=0, minsize=90)
+        conn_container.grid_columnconfigure(3, weight=1, minsize=150)
+        
+        for row_idx, row_data in enumerate(conn_data):
+            for col_idx, (label, value) in enumerate(row_data):
+                col_offset = col_idx * 2
+                
+                tk.Label(conn_container, text=f"{label}:", font=('Segoe UI', 9, 'bold'),
+                        bg="#F8F9FA", fg="#495057", anchor="w").grid(
+                            row=row_idx, column=col_offset, sticky="w", padx=(0, 5), pady=3)
+                
+                value_str = str(value) if value else 'N/A'
+                value_label = tk.Label(conn_container, text=value_str, font=('Segoe UI', 9),
+                        bg="#F8F9FA", fg="#212529", anchor="w", cursor="hand2")
+                value_label.grid(row=row_idx, column=col_offset+1, sticky="w", padx=(0, 20), pady=3)
+                
+                def make_copy3(v, lbl):
+                    def copy_value(e=None):
+                        if v != 'N/A':
+                            self.parent.clipboard_clear()
+                            self.parent.clipboard_append(v)
+                            lbl.config(fg="#28A745")
+                            self.parent.after(500, lambda: lbl.config(fg="#212529"))
+                    return copy_value
+                
+                value_label.bind("<Button-1>", make_copy3(value_str, value_label))
+                
+                def make_hover3(lbl):
+                    def on_enter(e):
+                        if lbl['text'] != 'N/A':
+                            lbl.config(fg="#0066CC")
+                    def on_leave(e):
+                        lbl.config(fg="#212529")
+                    return on_enter, on_leave
+                
+                enter_func, leave_func = make_hover3(value_label)
+                value_label.bind("<Enter>", enter_func)
+                value_label.bind("<Leave>", leave_func)
         
         # Setup ping button in the ping_frame we created at the top
         # Ping button and result container - pack to the left side
@@ -594,20 +1026,199 @@ class APPanel:
         ping_result_label = tk.Label(ping_container, text="", font=('Segoe UI', 10),
                                      bg="#F8F9FA", fg="#6C757D", anchor="w")
         ping_result_label.pack(side=tk.LEFT, fill=tk.X, expand=True)
+        
+        # Load Vusion status in background
+        self._load_overview_vusion_status(ap_data)
     
-    def _create_copyable_field(self, parent, label_text, value):
-        """Create a field with copyable text entry."""
-        row = tk.Frame(parent, bg="#FFFFFF")
-        row.pack(fill=tk.X, pady=5)
+    def _load_overview_vusion_status(self, ap_data):
+        """Load Vusion status for AP Overview in background."""
+        import threading
         
-        tk.Label(row, text=f"{label_text}:", font=('Segoe UI', 10, 'bold'),
-                bg="#FFFFFF", fg="#495057", width=18, anchor="w").pack(side=tk.LEFT)
+        def load_vusion():
+            try:
+                from vusion_api_helper import VusionAPIHelper
+                from vusion_api_config import VusionAPIConfig
+                
+                ap_id = ap_data.get('ap_id', '')
+                store_id = ap_data.get('store_id', '')
+                
+                if not store_id:
+                    return
+                
+                # Parse country from store_id
+                country = self._get_country_from_store_id(store_id)
+                if not country:
+                    return
+                
+                # Check if API key is configured
+                config = VusionAPIConfig()
+                api_key = config.get_api_key(country, 'vusion_pro')
+                if not api_key:
+                    return
+                
+                # Get transmitter status from Vusion API
+                helper = VusionAPIHelper()
+                success, transmitters = helper.get_transmitter_status(country, store_id)
+                
+                if success and transmitters:
+                    # Find matching transmitter
+                    for transmitter in transmitters:
+                        if str(transmitter.get('id')) == str(ap_id):
+                            connectivity = transmitter.get('connectivity', {})
+                            status = connectivity.get('status', 'UNKNOWN')
+                            
+                            # Update UI in main thread
+                            if 'overview_status_label' in ap_data:
+                                def update_ui():
+                                    if status == 'ONLINE':
+                                        ap_data['overview_status_label'].config(
+                                            text="ONLINE",
+                                            bg="#28A745",
+                                            fg="white"
+                                        )
+                                    else:
+                                        ap_data['overview_status_label'].config(
+                                            text="OFFLINE",
+                                            bg="#DC3545",
+                                            fg="white"
+                                        )
+                                    
+                                    # Also store full transmitter data for database update
+                                    self._save_vusion_data_to_db(ap_id, transmitter)
+                                
+                                self.parent.after(0, update_ui)
+                            break
+                else:
+                    # No transmitters found or error
+                    if 'overview_status_label' in ap_data:
+                        def update_ui_error():
+                            ap_data['overview_status_label'].config(
+                                text="UNKNOWN",
+                                bg="#6C757D",
+                                fg="white"
+                            )
+                        self.parent.after(0, update_ui_error)
+            except Exception as e:
+                print(f"Error loading Vusion status: {e}")
+                if 'overview_status_label' in ap_data:
+                    def update_ui_error():
+                        ap_data['overview_status_label'].config(
+                            text="ERROR",
+                            bg="#FFC107",
+                            fg="white"
+                        )
+                    self.parent.after(0, update_ui_error)
         
-        entry = tk.Entry(row, font=('Segoe UI', 10),
-                        bd=0, relief=tk.FLAT, highlightthickness=0)
-        entry.insert(0, str(value))
-        entry.config(state='readonly', readonlybackground="#FFFFFF", fg="#212529")
-        entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(10, 0))
+        # Start background thread
+        thread = threading.Thread(target=load_vusion, daemon=True)
+        thread.start()
+    
+    def _save_vusion_data_to_db(self, ap_id, transmitter_data):
+        """Save Vusion transmitter data to database."""
+        try:
+            # Import database manager
+            from database_manager import DatabaseManager
+            db = DatabaseManager()
+            
+            # Update Vusion data in database
+            success, message = db.update_vusion_data(ap_id, transmitter_data)
+            
+            if success:
+                print(f"Vusion data saved for {ap_id}")
+            else:
+                print(f"Failed to save Vusion data for {ap_id}: {message}")
+        except Exception as e:
+            print(f"Error saving Vusion data to database: {e}")
+    
+    def _create_grid_card(self, parent, row, col, title, fields):
+        """Create a Jira-style info card in grid layout."""
+        card = tk.Frame(parent, bg="#F8F9FA", relief=tk.SOLID, borderwidth=1)
+        card.grid(row=row, column=col, padx=6, pady=6, sticky="nsew")
+        
+        card_content = tk.Frame(card, bg="#F8F9FA", padx=12, pady=10)
+        card_content.pack(fill=tk.BOTH, expand=True)
+        
+        # Card title
+        tk.Label(card_content, text=title, font=('Segoe UI', 9, 'bold'),
+                bg="#F8F9FA", fg="#172B4D", anchor="w").pack(fill=tk.X, pady=(0, 8))
+        
+        # Fields
+        for label_text, value in fields:
+            self._create_grid_field_row(card_content, label_text, value)
+    
+    def _create_grid_field_row(self, parent, label_text, value):
+        """Create a compact copyable field row for grid cards."""
+        row = tk.Frame(parent, bg="#F8F9FA")
+        row.pack(fill=tk.X, pady=2)
+        
+        # Label
+        tk.Label(row, text=f"{label_text}:", font=('Segoe UI', 8),
+                bg="#F8F9FA", fg="#5E6C84", anchor="w").pack(fill=tk.X)
+        
+        # Value as selectable label
+        value_str = str(value) if value else 'N/A'
+        value_label = tk.Label(row, text=value_str, font=('Segoe UI', 9),
+                              bg="#F8F9FA", fg="#172B4D", anchor="w",
+                              cursor="hand2", wraplength=180)
+        value_label.pack(fill=tk.X, pady=(2, 0))
+        
+        # Click to copy
+        def copy_value(e=None):
+            if value_str != 'N/A':
+                self.parent.clipboard_clear()
+                self.parent.clipboard_append(value_str)
+                value_label.config(fg="#28A745")
+                self.parent.after(500, lambda: value_label.config(fg="#172B4D"))
+        
+        value_label.bind("<Button-1>", copy_value)
+        
+        # Hover effect
+        def on_enter(e):
+            if value_str != 'N/A':
+                value_label.config(fg="#0066CC")
+        
+        def on_leave(e):
+            value_label.config(fg="#172B4D")
+        
+        value_label.bind("<Enter>", on_enter)
+        value_label.bind("<Leave>", on_leave)
+    
+    def _create_copyable_field_row(self, parent, label_text, value):
+        """Create a single copyable field row with click-to-copy (legacy method for other uses)."""
+        row = tk.Frame(parent, bg="#F8F9FA")
+        row.pack(fill=tk.X, pady=3)
+        
+        # Label
+        tk.Label(row, text=f"{label_text}:", font=('Segoe UI', 9),
+                bg="#F8F9FA", fg="#5E6C84", width=20, anchor="w").pack(side=tk.LEFT)
+        
+        # Value as selectable label
+        value_str = str(value) if value else 'N/A'
+        value_label = tk.Label(row, text=value_str, font=('Segoe UI', 9),
+                              bg="#F8F9FA", fg="#172B4D", anchor="w",
+                              cursor="hand2")
+        value_label.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(5, 0))
+        
+        # Click to copy
+        def copy_value(e=None):
+            if value_str != 'N/A':
+                self.parent.clipboard_clear()
+                self.parent.clipboard_append(value_str)
+                value_label.config(fg="#28A745")
+                self.parent.after(500, lambda: value_label.config(fg="#172B4D"))
+        
+        value_label.bind("<Button-1>", copy_value)
+        
+        # Hover effect
+        def on_enter(e):
+            if value_str != 'N/A':
+                value_label.config(fg="#0066CC")
+        
+        def on_leave(e):
+            value_label.config(fg="#172B4D")
+        
+        value_label.bind("<Enter>", on_enter)
+        value_label.bind("<Leave>", on_leave)
     
     def _populate_all_fields_tab(self, frame, ap_data):
         """Populate all fields tab with all available data in 2 columns."""
@@ -648,7 +1259,11 @@ class APPanel:
             'connectivity_internet', 'connectivity_provisioning', 
             'connectivity_ntp_server', 'connectivity_apc_address',
             'status', 'last_seen', 'last_ping_time', 'username_webui',
-            'username_ssh', 'notes', 'created_at', 'updated_at'
+            'username_ssh', 'notes',
+            'vusion_display_name', 'vusion_creation_date', 'vusion_modification_date',
+            'vusion_last_offline_date', 'vusion_last_online_date', 
+            'vusion_comment', 'vusion_information', 'vusion_status',
+            'created_at', 'updated_at'
         ]
         
         # Split fields between columns

@@ -25,9 +25,18 @@ class ActivityLogPanel:
         tk.Label(header, text="Activity Log", font=('Segoe UI', 12, 'bold'),
                 bg="#4F7BA8", fg="white").pack(side=tk.LEFT, padx=15, pady=8)
         
+        # Pause/Resume button
+        self.is_paused = False
+        self.paused_entries = []
+        
+        self.pause_btn = tk.Button(header, text="⏸ Pause", command=self._toggle_pause,
+                 bg="#FFC107", fg="black", font=('Segoe UI', 8),
+                 padx=10, pady=2, relief=tk.FLAT, cursor="hand2")
+        self.pause_btn.pack(side=tk.RIGHT, padx=5)
+        
         tk.Button(header, text="Clear", command=self._clear_log,
                  bg="#DC3545", fg="white", font=('Segoe UI', 8),
-                 padx=10, pady=2, relief=tk.FLAT, cursor="hand2").pack(side=tk.RIGHT, padx=10)
+                 padx=10, pady=2, relief=tk.FLAT, cursor="hand2").pack(side=tk.RIGHT, padx=5)
         
         tk.Button(header, text="Export", command=self._export_log,
                  bg="#28A745", fg="white", font=('Segoe UI', 8),
@@ -135,6 +144,11 @@ class ActivityLogPanel:
         }
         self.log_entries.append(entry)
         
+        # If paused, store in buffer and don't display
+        if self.is_paused:
+            self.paused_entries.append(entry)
+            return
+        
         # Check filter based on checkboxes
         if not self._should_show_level(level):
             return
@@ -194,6 +208,31 @@ class ActivityLogPanel:
                 self.log_text.delete('1.0', tk.END)
                 self.log_entries = []
                 self.log_message("System", "Activity log cleared", "info")
+    
+    def _toggle_pause(self):
+        """Toggle pause state of activity log."""
+        self.is_paused = not self.is_paused
+        
+        if self.is_paused:
+            # Paused - change button appearance
+            self.pause_btn.config(text="▶ Resume", bg="#28A745", fg="white")
+        else:
+            # Resuming - display all paused entries
+            self.pause_btn.config(text="⏸ Pause", bg="#FFC107", fg="black")
+            
+            # Display all buffered entries
+            for entry in self.paused_entries:
+                # Check filter
+                if self._should_show_level(entry['level']):
+                    self.log_text.insert(tk.END, f"[{entry['timestamp']}] ", "timestamp")
+                    self.log_text.insert(tk.END, f"[{entry['source']}] ", "source")
+                    self.log_text.insert(tk.END, f"{entry['message']}\n", entry['level'])
+            
+            # Clear paused buffer
+            self.paused_entries = []
+            
+            # Auto-scroll to bottom
+            self.log_text.see(tk.END)
     
     def _export_log(self):
         """Export activity log to file."""
