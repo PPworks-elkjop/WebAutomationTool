@@ -1075,7 +1075,7 @@ class AuditLogViewer:
         self._refresh_log()
     
     def _build_ui(self):
-        """Build the audit log viewer UI with tabs."""
+        """Build the audit log viewer UI with custom tabs."""
         # Header
         header = tk.Frame(self.window, bg="#2C3E50", height=60)
         header.pack(fill="x")
@@ -1089,81 +1089,158 @@ class AuditLogViewer:
             fg="white"
         ).pack(side="left", padx=20, pady=15)
         
-        # Content with tabs
-        content = tk.Frame(self.window, bg="#F5F5F5")
-        content.pack(fill="both", expand=True, padx=20, pady=20)
+        # Custom tab bar
+        tab_bar = tk.Frame(self.window, bg="#34495E", height=50)
+        tab_bar.pack(fill="x")
+        tab_bar.pack_propagate(False)
         
-        # Create notebook for tabs
-        self.notebook = ttk.Notebook(content)
-        self.notebook.pack(fill="both", expand=True)
+        # Tab buttons
+        self.audit_tab_btn = tk.Button(
+            tab_bar,
+            text="Audit Log",
+            command=lambda: self._switch_tab("audit"),
+            bg="#2C3E50",
+            fg="white",
+            font=("Segoe UI", 11, "bold"),
+            relief="flat",
+            cursor="hand2",
+            padx=30,
+            pady=10,
+            activebackground="#1A252F",
+            activeforeground="white"
+        )
+        self.audit_tab_btn.pack(side="left", padx=(20, 2))
         
-        # Audit Log tab
-        self.audit_tab = tk.Frame(self.notebook, bg="#F5F5F5")
-        self.notebook.add(self.audit_tab, text="Audit Log")
+        self.activity_tab_btn = tk.Button(
+            tab_bar,
+            text="Activity Tracking",
+            command=lambda: self._switch_tab("activity"),
+            bg="#34495E",
+            fg="#BDC3C7",
+            font=("Segoe UI", 11),
+            relief="flat",
+            cursor="hand2",
+            padx=30,
+            pady=10,
+            activebackground="#2C3E50",
+            activeforeground="white"
+        )
+        self.activity_tab_btn.pack(side="left", padx=2)
         
-        # Activity Tracking tab
-        self.activity_tab = tk.Frame(self.notebook, bg="#F5F5F5")
-        self.notebook.add(self.activity_tab, text="Activity Tracking")
+        # Content container
+        self.content_container = tk.Frame(self.window, bg="#F5F5F5")
+        self.content_container.pack(fill="both", expand=True, padx=20, pady=20)
+        
+        # Create both tab contents
+        self.audit_tab = tk.Frame(self.content_container, bg="#F5F5F5")
+        self.activity_tab = tk.Frame(self.content_container, bg="#F5F5F5")
         
         # Build individual tab contents
         self._build_audit_tab()
         self._build_activity_tab()
+        
+        # Show audit tab by default
+        self.audit_tab.pack(fill="both", expand=True)
+        self.current_tab = "audit"
+    
+    def _switch_tab(self, tab_name):
+        """Switch between tabs with custom styling."""
+        if tab_name == self.current_tab:
+            return
+        
+        # Hide current tab
+        if self.current_tab == "audit":
+            self.audit_tab.pack_forget()
+        else:
+            self.activity_tab.pack_forget()
+        
+        # Update button styles and show new tab
+        if tab_name == "audit":
+            self.audit_tab_btn.config(bg="#2C3E50", fg="white", font=("Segoe UI", 11, "bold"))
+            self.activity_tab_btn.config(bg="#34495E", fg="#BDC3C7", font=("Segoe UI", 11))
+            self.audit_tab.pack(fill="both", expand=True)
+        else:
+            self.activity_tab_btn.config(bg="#2C3E50", fg="white", font=("Segoe UI", 11, "bold"))
+            self.audit_tab_btn.config(bg="#34495E", fg="#BDC3C7", font=("Segoe UI", 11))
+            self.activity_tab.pack(fill="both", expand=True)
+        
+        self.current_tab = tab_name
     
     def _build_audit_tab(self):
         """Build the audit log tab content."""
         content = self.audit_tab
         
-        # Toolbar
-        toolbar = tk.Frame(content, bg="#F5F5F5")
-        toolbar.pack(fill="x", pady=(10, 10))
+        # Toolbar with modern styling
+        toolbar = tk.Frame(content, bg="white", relief="solid", bd=1)
+        toolbar.pack(fill="x", pady=(0, 15))
         
-        tk.Label(toolbar, text="Filter by user:", font=("Segoe UI", 10),
-                bg="#F5F5F5", fg="#495057").pack(side="left", padx=(0, 5))
+        toolbar_inner = tk.Frame(toolbar, bg="white")
+        toolbar_inner.pack(fill="x", padx=15, pady=12)
+        
+        tk.Label(toolbar_inner, text="🔍 Filter by user:", font=("Segoe UI", 10, "bold"),
+                bg="white", fg="#2C3E50").pack(side="left", padx=(0, 10))
+        
+        # Entry with border frame for rounded effect
+        entry_frame = tk.Frame(toolbar_inner, bg="#E9ECEF", relief="flat", bd=0)
+        entry_frame.pack(side="left", padx=(0, 10))
+        
         self.audit_filter_var = tk.StringVar(master=self.window)
-        filter_entry = tk.Entry(toolbar, textvariable=self.audit_filter_var, width=20,
-                               font=("Segoe UI", 10), bd=1, relief="solid")
-        filter_entry.pack(side="left", padx=(0, 5))
+        filter_entry = tk.Entry(entry_frame, textvariable=self.audit_filter_var, width=25,
+                               font=("Segoe UI", 10), bd=0, relief="flat", bg="white",
+                               highlightthickness=1, highlightbackground="#CED4DA",
+                               highlightcolor="#007BFF")
+        filter_entry.pack(padx=1, pady=1)
         filter_entry.bind('<Return>', lambda e: self._refresh_audit_log())
         
+        # Buttons with hover effects
         filter_btn = tk.Button(
-            toolbar,
-            text="Filter",
+            toolbar_inner,
+            text="🔎 Filter",
             command=self._refresh_audit_log,
             bg="#007BFF",
             fg="white",
             font=("Segoe UI", 10, "bold"),
             relief="flat",
             cursor="hand2",
-            padx=15,
-            pady=5
+            padx=20,
+            pady=8,
+            bd=0,
+            activebackground="#0056B3",
+            activeforeground="white"
         )
-        filter_btn.pack(side="left", padx=(0, 5))
+        filter_btn.pack(side="left", padx=(0, 8))
         
         clear_btn = tk.Button(
-            toolbar,
-            text="Clear",
+            toolbar_inner,
+            text="✖ Clear",
             command=lambda: [self.audit_filter_var.set(''), self._refresh_audit_log()],
             bg="#6C757D",
             fg="white",
             font=("Segoe UI", 10, "bold"),
             relief="flat",
             cursor="hand2",
-            padx=15,
-            pady=5
+            padx=20,
+            pady=8,
+            bd=0,
+            activebackground="#545B62",
+            activeforeground="white"
         )
-        clear_btn.pack(side="left", padx=(0, 5))
+        clear_btn.pack(side="left", padx=(0, 8))
         
         refresh_btn = tk.Button(
-            toolbar,
+            toolbar_inner,
             text="🔄 Refresh",
             command=self._refresh_audit_log,
-            bg="#6C757D",
+            bg="#28A745",
             fg="white",
             font=("Segoe UI", 10, "bold"),
             relief="flat",
             cursor="hand2",
-            padx=15,
-            pady=5
+            padx=20,
+            pady=8,
+            bd=0,
+            activebackground="#1E7E34",
+            activeforeground="white"
         )
         refresh_btn.pack(side="left")
         
@@ -1194,67 +1271,98 @@ class AuditLogViewer:
         """Build the activity tracking tab content."""
         content = self.activity_tab
         
-        # Toolbar
-        toolbar = tk.Frame(content, bg="#F5F5F5")
-        toolbar.pack(fill="x", pady=(10, 10))
+        # Toolbar with modern styling
+        toolbar = tk.Frame(content, bg="white", relief="solid", bd=1)
+        toolbar.pack(fill="x", pady=(0, 15))
         
-        tk.Label(toolbar, text="Filter by user:", font=("Segoe UI", 10),
-                bg="#F5F5F5", fg="#495057").pack(side="left", padx=(0, 5))
+        toolbar_inner = tk.Frame(toolbar, bg="white")
+        toolbar_inner.pack(fill="x", padx=15, pady=12)
+        
+        # User filter
+        tk.Label(toolbar_inner, text="🔍 Filter by user:", font=("Segoe UI", 10, "bold"),
+                bg="white", fg="#2C3E50").pack(side="left", padx=(0, 10))
+        
+        user_entry_frame = tk.Frame(toolbar_inner, bg="#E9ECEF", relief="flat", bd=0)
+        user_entry_frame.pack(side="left", padx=(0, 15))
+        
         self.activity_user_filter = tk.StringVar(master=self.window)
-        user_entry = tk.Entry(toolbar, textvariable=self.activity_user_filter, width=20,
-                             font=("Segoe UI", 10), bd=1, relief="solid")
-        user_entry.pack(side="left", padx=(0, 5))
+        user_entry = tk.Entry(user_entry_frame, textvariable=self.activity_user_filter, width=20,
+                             font=("Segoe UI", 10), bd=0, relief="flat", bg="white",
+                             highlightthickness=1, highlightbackground="#CED4DA",
+                             highlightcolor="#007BFF")
+        user_entry.pack(padx=1, pady=1)
         user_entry.bind('<Return>', lambda e: self._refresh_activity_log())
         
-        tk.Label(toolbar, text="Activity type:", font=("Segoe UI", 10),
-                bg="#F5F5F5", fg="#495057").pack(side="left", padx=(10, 5))
-        self.activity_type_filter = tk.StringVar(master=self.window, value="All")
-        type_combo = ttk.Combobox(toolbar, textvariable=self.activity_type_filter, width=18,
-                                 font=("Segoe UI", 10), state="readonly")
-        type_combo['values'] = ("All", "login", "logout", "ap_connect", "provision", "ssh_enable", "ssh_disable", 
-                                 "note_create", "note_delete", "note_reply", "note_reply_delete", 
-                                 "view_credentials", "user_management", "password_change", "view_audit")
-        type_combo.pack(side="left", padx=(0, 5))
+        # Activity type filter with custom dropdown styling
+        tk.Label(toolbar_inner, text="📋 Activity type:", font=("Segoe UI", 10, "bold"),
+                bg="white", fg="#2C3E50").pack(side="left", padx=(0, 10))
         
+        # Create custom dropdown button
+        self.activity_type_filter = tk.StringVar(master=self.window, value="All")
+        
+        dropdown_frame = tk.Frame(toolbar_inner, bg="white", relief="solid", bd=1)
+        dropdown_frame.pack(side="left", padx=(0, 15))
+        
+        type_menu = tk.OptionMenu(dropdown_frame, self.activity_type_filter, "All", "login", "logout", 
+                                  "ap_connect", "provision", "ssh_enable", "ssh_disable",
+                                  "note_create", "note_delete", "note_reply", "note_reply_delete",
+                                  "view_credentials", "user_management", "password_change", "view_audit")
+        type_menu.config(bg="white", fg="#2C3E50", font=("Segoe UI", 10), relief="flat", 
+                        bd=0, highlightthickness=0, width=18, anchor="w", cursor="hand2",
+                        activebackground="#E9ECEF", activeforeground="#2C3E50")
+        type_menu["menu"].config(bg="white", fg="#2C3E50", font=("Segoe UI", 10), 
+                                activebackground="#007BFF", activeforeground="white")
+        type_menu.pack(padx=1, pady=1)
+        
+        # Buttons with hover effects
         filter_btn = tk.Button(
-            toolbar,
-            text="Filter",
+            toolbar_inner,
+            text="🔎 Filter",
             command=self._refresh_activity_log,
             bg="#007BFF",
             fg="white",
             font=("Segoe UI", 10, "bold"),
             relief="flat",
             cursor="hand2",
-            padx=15,
-            pady=5
+            padx=20,
+            pady=8,
+            bd=0,
+            activebackground="#0056B3",
+            activeforeground="white"
         )
-        filter_btn.pack(side="left", padx=(5, 5))
+        filter_btn.pack(side="left", padx=(0, 8))
         
         clear_btn = tk.Button(
-            toolbar,
-            text="Clear",
+            toolbar_inner,
+            text="✖ Clear",
             command=lambda: [self.activity_user_filter.set(''), self.activity_type_filter.set('All'), self._refresh_activity_log()],
             bg="#6C757D",
             fg="white",
             font=("Segoe UI", 10, "bold"),
             relief="flat",
             cursor="hand2",
-            padx=15,
-            pady=5
+            padx=20,
+            pady=8,
+            bd=0,
+            activebackground="#545B62",
+            activeforeground="white"
         )
-        clear_btn.pack(side="left", padx=(0, 5))
+        clear_btn.pack(side="left", padx=(0, 8))
         
         refresh_btn = tk.Button(
-            toolbar,
+            toolbar_inner,
             text="🔄 Refresh",
             command=self._refresh_activity_log,
-            bg="#6C757D",
+            bg="#28A745",
             fg="white",
             font=("Segoe UI", 10, "bold"),
             relief="flat",
             cursor="hand2",
-            padx=15,
-            pady=5
+            padx=20,
+            pady=8,
+            bd=0,
+            activebackground="#1E7E34",
+            activeforeground="white"
         )
         refresh_btn.pack(side="left")
         
