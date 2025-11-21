@@ -591,6 +591,10 @@ class APPanel:
         
         self._log(f"Opened AP {ap_id}")
         
+        # Log user activity
+        username = self.current_user.get('username') if isinstance(self.current_user, dict) else self.current_user
+        self.db.log_user_activity(username, 'ap_connect', f'Opened AP {ap_id}', ap_id=ap_id)
+        
         # Notify parent
         if self.on_ap_change:
             self.on_ap_change(ap_id, ap_data)
@@ -1677,6 +1681,10 @@ class APPanel:
                     time.sleep(2)
                     
                     log("✓ Provisioning enabled")
+                    # Log activity
+                    username = self.current_user.get('username') if isinstance(self.current_user, dict) else self.current_user
+                    self.db.log_user_activity(username, 'provision', f'Enabled provisioning on AP {ap_data.get("ap_id")}', 
+                                             ap_id=ap_data.get('ap_id'), success=True)
                     def show_success():
                         messagebox.showinfo("Success", "Provisioning has been enabled", parent=self.parent)
                     self.parent.after(0, show_success)
@@ -1702,6 +1710,10 @@ class APPanel:
                     time.sleep(2)
                     
                     log("✓ Provisioning disabled")
+                    # Log activity
+                    username = self.current_user.get('username') if isinstance(self.current_user, dict) else self.current_user
+                    self.db.log_user_activity(username, 'provision', f'Disabled provisioning on AP {ap_data.get("ap_id")}', 
+                                             ap_id=ap_data.get('ap_id'), success=True)
                     def show_success():
                         messagebox.showinfo("Success", "Provisioning has been disabled", parent=self.parent)
                     self.parent.after(0, show_success)
@@ -1845,6 +1857,10 @@ class APPanel:
                     time.sleep(2)
                     
                     log("✓ SSH enabled")
+                    # Log activity
+                    username = self.current_user.get('username') if isinstance(self.current_user, dict) else self.current_user
+                    self.db.log_user_activity(username, 'ssh_enable', f'Enabled SSH on AP {ap_data.get("ap_id")}', 
+                                             ap_id=ap_data.get('ap_id'), success=True)
                     
                     # Re-enable provisioning if it was originally enabled
                     if provisioning_was_enabled:
@@ -1903,6 +1919,10 @@ class APPanel:
                     time.sleep(2)
                     
                     log("✓ SSH disabled")
+                    # Log activity
+                    username = self.current_user.get('username') if isinstance(self.current_user, dict) else self.current_user
+                    self.db.log_user_activity(username, 'ssh_disable', f'Disabled SSH on AP {ap_data.get("ap_id")}', 
+                                             ap_id=ap_data.get('ap_id'), success=True)
                     def show_success():
                         messagebox.showinfo("Success", "SSH has been disabled", parent=self.parent)
                     self.parent.after(0, show_success)

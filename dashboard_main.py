@@ -458,6 +458,7 @@ class DashboardMain:
             from credential_manager_modern import ModernCredentialManager
             ModernCredentialManager(current_user=self.current_user, parent=self.root, db_manager=self.db)
             self.activity_log.log_message("Admin", "Opened Credentials Manager", "info")
+            self.db.log_user_activity(self.username, 'view_credentials', 'Opened Credentials Manager')
         except Exception as e:
             messagebox.showerror("Error", f"Failed to open Credentials Manager: {e}")
     
@@ -470,6 +471,7 @@ class DashboardMain:
             from user_manager_modern import ModernUserManager
             ModernUserManager(self.current_user, self.root, self.db)
             self.activity_log.log_message("Admin", "Opened User Management", "info")
+            self.db.log_user_activity(self.username, 'user_management', 'Opened User Management')
         except Exception as e:
             messagebox.showerror("Error", f"Failed to open User Management: {e}")
     
@@ -478,7 +480,8 @@ class DashboardMain:
         try:
             from change_password_dialog import ChangePasswordDialog
             ChangePasswordDialog(self.root, self.current_user, self.db)
-            self.activity_log.log_message("Admin", "Changed password", "info")
+            self.activity_log.log_message("Admin", "Opened Change Password", "info")
+            self.db.log_user_activity(self.username, 'password_change', 'Opened Change Password dialog')
         except Exception as e:
             messagebox.showerror("Error", f"Failed to open Change Password: {e}")
     
@@ -506,6 +509,7 @@ class DashboardMain:
             user_mgr = UserManager()
             AuditLogViewer(self.root, user_mgr, self.db)
             self.activity_log.log_message("Admin", "Opened Audit Log", "info")
+            self.db.log_user_activity(self.username, 'view_audit', 'Opened Audit Log viewer')
         except Exception as e:
             messagebox.showerror("Error", f"Failed to open Audit Log: {e}")
     
