@@ -1265,7 +1265,7 @@ class AuditLogViewer:
         scrollbar = ttk.Scrollbar(list_frame)
         scrollbar.pack(side="right", fill="y")
         
-        columns = ("Timestamp", "Username", "Activity Type", "Description", "AP ID", "Success", "Details")
+        columns = ("Timestamp", "Username", "Activity Type", "Description", "AP ID", "IP Address", "Success", "Details")
         self.activity_tree = ttk.Treeview(list_frame, columns=columns, show="headings",
                                          yscrollcommand=scrollbar.set)
         scrollbar.config(command=self.activity_tree.yview)
@@ -1278,6 +1278,7 @@ class AuditLogViewer:
         self.activity_tree.column("Activity Type", width=130)
         self.activity_tree.column("Description", width=250)
         self.activity_tree.column("AP ID", width=100)
+        self.activity_tree.column("IP Address", width=120)
         self.activity_tree.column("Success", width=70)
         self.activity_tree.column("Details", width=200)
         
@@ -1377,6 +1378,7 @@ class AuditLogViewer:
                 log.get('activity_type', ''),
                 log.get('description', ''),
                 log.get('ap_id', '') or '',
+                log.get('ip_address', '') or '',
                 success_text,
                 log.get('details', '') or ''
             )
