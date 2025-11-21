@@ -19,16 +19,32 @@ class ModernUserManager:
         # If db_manager is provided, use it; otherwise create new UserManager
         if db_manager:
             # Create a wrapper that mimics UserManager interface
-            self.user_manager = type('obj', (object,), {
-                'db': db_manager,
-                'get_all_users': lambda: db_manager.get_all_users(),
-                'get_user': lambda username: db_manager.get_user(username),
-                'add_user': lambda username, full_name, password, role, created_by: db_manager.add_user(username, full_name, password, role, created_by),
-                'update_user': lambda username, **kwargs: db_manager.update_user(username, **kwargs),
-                'delete_user': lambda username, deleted_by: db_manager.delete_user(username, deleted_by),
-                'count': lambda: len(db_manager.get_all_users()),
-                'get_user_audit_log': lambda target_username=None, actor_username=None, limit=100: db_manager.get_user_audit_log(target_username, actor_username, limit)
-            })()
+            class UserManagerWrapper:
+                def __init__(self, db):
+                    self.db = db
+                
+                def get_all_users(self):
+                    return self.db.get_all_users()
+                
+                def get_user(self, username):
+                    return self.db.get_user(username)
+                
+                def add_user(self, username, full_name, password, role, created_by):
+                    return self.db.add_user(username, full_name, password, role, created_by)
+                
+                def update_user(self, username, **kwargs):
+                    return self.db.update_user(username, **kwargs)
+                
+                def delete_user(self, username, deleted_by):
+                    return self.db.delete_user(username, deleted_by)
+                
+                def count(self):
+                    return len(self.db.get_all_users())
+                
+                def get_user_audit_log(self, target_username=None, actor_username=None, limit=100):
+                    return self.db.get_user_audit_log(target_username, actor_username, limit)
+            
+            self.user_manager = UserManagerWrapper(db_manager)
         else:
             self.user_manager = UserManager()
         
