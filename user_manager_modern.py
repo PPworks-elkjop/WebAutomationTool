@@ -1208,13 +1208,12 @@ class AuditLogViewer:
         
         tk.Label(toolbar, text="Activity type:", font=("Segoe UI", 10),
                 bg="#F5F5F5", fg="#495057").pack(side="left", padx=(10, 5))
-        self.activity_type_filter = tk.StringVar()
+        self.activity_type_filter = tk.StringVar(value="All")
         type_combo = ttk.Combobox(toolbar, textvariable=self.activity_type_filter, width=18,
                                  font=("Segoe UI", 10), state="readonly")
         type_combo['values'] = ("All", "login", "logout", "ap_connect", "provision", "ssh_enable", "ssh_disable", 
                                  "note_create", "note_delete", "note_reply", "note_reply_delete", 
                                  "view_credentials", "user_management", "password_change", "view_audit")
-        type_combo.current(0)
         type_combo.pack(side="left", padx=(0, 5))
         
         filter_btn = tk.Button(
