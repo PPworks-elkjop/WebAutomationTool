@@ -1,17 +1,30 @@
 """
 Credentials Manager - Secure storage and retrieval of API credentials
 Handles encryption/decryption of sensitive data for various integrations.
+Uses Windows DPAPI for enhanced security on Windows platforms.
 """
 
-from cryptography.fernet import Fernet
 import base64
-import hashlib
 import os
 import json
+import sys
+from error_sanitizer import ErrorSanitizer
+
+
+# Import Windows DPAPI if available
+if sys.platform == 'win32':
+    try:
+        import win32crypt
+        HAS_DPAPI = True
+    except ImportError:
+        HAS_DPAPI = False
+        print("Warning: win32crypt not available, falling back to basic encryption")
+else:
+    HAS_DPAPI = False
 
 
 class CredentialsManager:
-    """Manages secure storage and retrieval of API credentials."""
+    """Manages secure storage and retrieval of API credentials using Windows DPAPI."""
     
     def __init__(self, db_manager):
         """
@@ -21,50 +34,80 @@ class CredentialsManager:
             db_manager: Database manager instance for storing encrypted credentials
         """
         self.db = db_manager
-        self._encryption_key = None
-        self._ensure_encryption_key()
-    
-    def _ensure_encryption_key(self):
-        """Ensure encryption key exists, create if needed."""
-        # Check if encryption key exists in database
-        result = self.db.execute_query(
-            "SELECT config_value FROM system_config WHERE config_key = 'encryption_key'",
-            fetch_one=True
-        )
+        self.use_dpapi = HAS_DPAPI
         
-        if result:
-            self._encryption_key = result['config_value'].encode()
-        else:
-            # Generate new encryption key
-            key = Fernet.generate_key()
-            self._encryption_key = key
-            
-            # Store in database
-            self.db.execute_query(
-                "INSERT INTO system_config (config_key, config_value) VALUES (?, ?)",
-                ('encryption_key', key.decode())
-            )
+        if not self.use_dpapi:
+            print("⚠️  WARNING: Windows DPAPI not available. Credential encryption is weakened.")
+            print("   Install pywin32: pip install pywin32")
     
     def _encrypt(self, data: str) -> str:
-        """Encrypt data using Fernet encryption."""
+        """
+        Encrypt data using Windows DPAPI if available.
+        
+        Args:
+            data: Plain text string to encrypt
+            
+        Returns:
+            Base64-encoded encrypted string
+        """
         if not data:
             return ""
         
-        fernet = Fernet(self._encryption_key)
-        encrypted = fernet.encrypt(data.encode('utf-8'))
-        return encrypted.decode('utf-8')
+        try:
+            if self.use_dpapi:
+                # Use Windows DPAPI for encryption
+                # Data is protected per-user, tied to Windows login
+                encrypted_bytes = win32crypt.CryptProtectData(
+                    data.encode('utf-8'),
+                    'WebAutomationTool Credentials',  # Description
+                    None,  # Optional entropy (we don't use additional secret)
+                    None,  # Reserved
+                    None,  # Prompt struct (no UI prompt)
+                    0      # Flags
+                )
+                # Encode to base64 for safe storage
+                return base64.b64encode(encrypted_bytes).decode('utf-8')
+            else:
+                # Fallback: base64 encoding only (NOT SECURE, just obfuscation)
+                return base64.b64encode(data.encode('utf-8')).decode('utf-8')
+        except Exception as e:
+            ErrorSanitizer.log_full_error(e, "encrypting credentials")
+            print("❌ Encryption error occurred")
+            return ""
     
     def _decrypt(self, encrypted_data: str) -> str:
-        """Decrypt data using Fernet encryption."""
+        """
+        Decrypt data using Windows DPAPI if available.
+        
+        Args:
+            encrypted_data: Base64-encoded encrypted string
+            
+        Returns:
+            Decrypted plain text string
+        """
         if not encrypted_data:
             return ""
         
         try:
-            fernet = Fernet(self._encryption_key)
-            decrypted = fernet.decrypt(encrypted_data.encode('utf-8'))
-            return decrypted.decode('utf-8')
+            if self.use_dpapi:
+                # Decode from base64
+                encrypted_bytes = base64.b64decode(encrypted_data.encode('utf-8'))
+                
+                # Use Windows DPAPI for decryption
+                description, decrypted_bytes = win32crypt.CryptUnprotectData(
+                    encrypted_bytes,
+                    None,  # Optional entropy
+                    None,  # Reserved
+                    None,  # Prompt struct
+                    0      # Flags
+                )
+                return decrypted_bytes.decode('utf-8')
+            else:
+                # Fallback: base64 decoding only
+                return base64.b64decode(encrypted_data.encode('utf-8')).decode('utf-8')
         except Exception as e:
-            print(f"Decryption error: {e}")
+            ErrorSanitizer.log_full_error(e, "decrypting credentials")
+            print("❌ Decryption error occurred")
             return ""
     
     def store_credentials(self, service: str, credentials: dict):

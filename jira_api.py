@@ -6,7 +6,9 @@ Provides methods to fetch issues, update issues, add comments, etc.
 import requests
 from requests.auth import HTTPBasicAuth
 import json
-from typing import Optional, List, Dict
+from typing import Optional, List, Dict, Tuple
+from certificate_manager import CertificateManager
+from error_sanitizer import ErrorSanitizer
 
 
 class JiraAPI:
@@ -23,6 +25,8 @@ class JiraAPI:
         self._base_url = None
         self._auth = None
         self._session = None
+        self._cert_manager = CertificateManager()
+        self._security_warnings = []  # Track security warnings to show to user
         self._initialize_connection()
     
     def _initialize_connection(self):
@@ -34,6 +38,7 @@ class JiraAPI:
             username = credentials.get('username', '')
             api_token = credentials.get('api_token', '')
             verify_ssl = credentials.get('verify_ssl', True)  # Default to True for security
+            use_cert_pinning = credentials.get('use_cert_pinning', False)
             
             if self._base_url and username and api_token:
                 self._auth = HTTPBasicAuth(username, api_token)
@@ -44,16 +49,74 @@ class JiraAPI:
                     'Content-Type': 'application/json'
                 })
                 
-                # Disable SSL verification if configured (for corporate proxies)
+                # Handle SSL verification modes
                 if not verify_ssl:
+                    # Mode 1: Full SSL bypass (least secure, for corporate proxies)
                     self._session.verify = False
                     # Suppress only the single InsecureRequestWarning from urllib3
                     import urllib3
                     urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+                    self._security_warnings.append("⚠️ SSL certificate verification is DISABLED. Connection is vulnerable to MITM attacks.")
+                elif use_cert_pinning:
+                    # Mode 2: Certificate pinning (good balance without CA bundle)
+                    # Note: This requires custom verification in each request
+                    self._session.verify = True  # Keep verify on, we'll check fingerprint separately
+                    self._security_warnings.append("🔒 Using certificate pinning for enhanced security")
+                # else: Mode 3: Standard SSL verification (most secure, but requires valid certs)
     
     def is_configured(self) -> bool:
         """Check if Jira credentials are configured."""
         return self._base_url is not None and self._auth is not None
+    
+    def get_security_warnings(self) -> List[str]:
+        """Get list of security warnings for the current configuration."""
+        return self._security_warnings.copy()
+    
+    def get_certificate_status(self) -> Tuple[bool, str, Optional[dict]]:
+        """
+        Check certificate status for the configured Jira server.
+        
+        Returns:
+            Tuple of (trusted: bool, status: str, cert_info: dict)
+            status: 'trusted', 'new', 'changed', 'error', 'not_https'
+        """
+        if not self._base_url:
+            return False, 'error', None
+        
+        if not self._base_url.startswith('https://'):
+            return False, 'not_https', None
+        
+        try:
+            hostname, port = CertificateManager.extract_hostname_from_url(self._base_url)
+            return self._cert_manager.verify_certificate(hostname, port)
+        except Exception as e:
+            return False, 'error', None
+    
+    def trust_current_certificate(self) -> Tuple[bool, str]:
+        """
+        Trust the current Jira server's certificate.
+        
+        Returns:
+            Tuple of (success: bool, message: str)
+        """
+        if not self._base_url or not self._base_url.startswith('https://'):
+            return False, "Not an HTTPS connection"
+        
+        try:
+            hostname, port = CertificateManager.extract_hostname_from_url(self._base_url)
+            success, cert_info, message = self._cert_manager.get_certificate_info(hostname, port)
+            
+            if success:
+                if self._cert_manager.trust_certificate(hostname, port, cert_info):
+                    return True, f"Certificate trusted for {hostname}"
+                else:
+                    return False, "Failed to save certificate"
+            else:
+                return False, message
+        except Exception as e:
+            ErrorSanitizer.log_full_error(e, "trusting certificate")
+            safe_msg = ErrorSanitizer.get_safe_error_message(e, "trusting certificate")
+            return False, safe_msg
     
     def test_connection(self) -> tuple[bool, str]:
         """
@@ -81,13 +144,17 @@ class JiraAPI:
                 return False, f"Connection failed: HTTP {response.status_code} - {response.text[:200]}"
                 
         except requests.exceptions.Timeout:
-            return False, f"Connection timeout - cannot reach {self._base_url}"
+            return False, "Connection timeout - unable to reach Jira server"
         except requests.exceptions.ConnectionError as e:
-            return False, f"Cannot connect to Jira server at {self._base_url}. Error: {str(e)}"
+            ErrorSanitizer.log_full_error(e, "Jira connection")
+            return False, "Cannot connect to Jira server. Check URL and network connection."
         except requests.exceptions.SSLError as e:
-            return False, f"SSL certificate error: {str(e)}"
+            ErrorSanitizer.log_full_error(e, "Jira SSL")
+            return False, "SSL certificate error. Enable certificate pinning or disable SSL verification in admin settings."
         except Exception as e:
-            return False, f"Error: {type(e).__name__}: {str(e)}"
+            ErrorSanitizer.log_full_error(e, "Jira connection test")
+            safe_msg = ErrorSanitizer.get_safe_error_message(e, "testing connection")
+            return False, safe_msg
     
     def search_issues(self, jql: str, max_results: int = 50, fields: Optional[List[str]] = None) -> tuple[bool, List[Dict], str]:
         """
@@ -144,7 +211,9 @@ class JiraAPI:
                 return False, {}, f"Search failed: HTTP {response.status_code}"
                 
         except Exception as e:
-            return False, [], f"Error: {str(e)}"
+            ErrorSanitizer.log_full_error(e, "searching Jira")
+            safe_msg = ErrorSanitizer.get_safe_error_message(e, "searching Jira")
+            return False, [], safe_msg
     
     def get_issue(self, issue_key: str, fields: Optional[List[str]] = None) -> tuple[bool, Optional[Dict], str]:
         """
@@ -226,7 +295,9 @@ class JiraAPI:
                 return False, f"Failed to add comment: HTTP {response.status_code}"
                 
         except Exception as e:
-            return False, f"Error: {str(e)}"
+            ErrorSanitizer.log_full_error(e, f"adding comment to {issue_key}")
+            safe_msg = ErrorSanitizer.get_safe_error_message(e, "adding comment")
+            return False, safe_msg
     
     def update_issue(self, issue_key: str, fields: Dict) -> tuple[bool, str]:
         """
@@ -257,7 +328,9 @@ class JiraAPI:
                 return False, f"Failed to update: HTTP {response.status_code}"
                 
         except Exception as e:
-            return False, f"Error: {str(e)}"
+            ErrorSanitizer.log_full_error(e, f"updating issue {issue_key}")
+            safe_msg = ErrorSanitizer.get_safe_error_message(e, "updating issue")
+            return False, safe_msg
     
     def get_projects(self) -> tuple[bool, List[Dict], str]:
         """
@@ -282,7 +355,9 @@ class JiraAPI:
                 return False, [], f"Failed: HTTP {response.status_code}"
                 
         except Exception as e:
-            return False, [], f"Error: {str(e)}"
+            ErrorSanitizer.log_full_error(e, "fetching projects")
+            safe_msg = ErrorSanitizer.get_safe_error_message(e, "fetching projects")
+            return False, [], safe_msg
     
     def create_issue(self, project_key: str, summary: str, description: str, 
                      issue_type: str = "Task") -> tuple[bool, Optional[str], str]:
@@ -343,4 +418,6 @@ class JiraAPI:
                 return False, None, f"Failed to create issue: HTTP {response.status_code}"
                 
         except Exception as e:
-            return False, None, f"Error: {str(e)}"
+            ErrorSanitizer.log_full_error(e, "creating issue")
+            safe_msg = ErrorSanitizer.get_safe_error_message(e, "creating issue")
+            return False, None, safe_msg

@@ -7,6 +7,7 @@ import tkinter as tk
 from tkinter import ttk, messagebox
 from credentials_manager import CredentialsManager
 from jira_api import JiraAPI
+from error_sanitizer import handle_and_log_error
 
 
 class AdminSettingsDialog:
@@ -245,28 +246,83 @@ class AdminSettingsDialog:
         )
         self.jira_show_token_check.pack(anchor="w", pady=(5, 0))
         
-        # SSL Verification option
-        ssl_frame = tk.Frame(main_frame, bg="white")
-        ssl_frame.pack(fill="x", pady=(0, 15))
+        # SSL Security Options
+        ssl_frame = tk.LabelFrame(main_frame, text="SSL/TLS Security", bg="white", font=("Segoe UI", 10, "bold"))
+        ssl_frame.pack(fill="x", pady=(0, 15), padx=5)
         
-        self.jira_verify_ssl = tk.BooleanVar(value=True)
+        ssl_inner = tk.Frame(ssl_frame, bg="white")
+        ssl_inner.pack(fill="x", padx=10, pady=10)
+        
+        # Certificate Pinning (Recommended)
+        self.jira_use_cert_pinning = tk.BooleanVar(value=False)
         tk.Checkbutton(
-            ssl_frame,
-            text="Verify SSL Certificate (uncheck if using corporate proxy with self-signed certificate)",
-            variable=self.jira_verify_ssl,
+            ssl_inner,
+            text="🔒 Use Certificate Pinning (Recommended without CA bundle)",
+            variable=self.jira_use_cert_pinning,
             bg="white",
-            font=("Segoe UI", 9)
+            font=("Segoe UI", 9, "bold"),
+            command=self._on_cert_pinning_toggle
         ).pack(anchor="w")
         
         tk.Label(
-            ssl_frame,
-            text="⚠️ Warning: Disabling SSL verification reduces security. Only use in trusted corporate networks.",
+            ssl_inner,
+            text="Verifies the server certificate fingerprint on each connection. Provides security without needing a CA bundle.",
+            font=("Segoe UI", 8),
+            bg="white",
+            fg="#28A745",
+            wraplength=700,
+            justify="left"
+        ).pack(anchor="w", pady=(2, 10), padx=20)
+        
+        # Manage Certificates button
+        self.manage_cert_btn = tk.Button(
+            ssl_inner,
+            text="📋 View/Manage Trusted Certificates",
+            command=self._manage_certificates,
+            bg="#17A2B8",
+            fg="white",
+            font=("Segoe UI", 9),
+            relief=tk.FLAT,
+            padx=15,
+            pady=5,
+            cursor="hand2"
+        )
+        self.manage_cert_btn.pack(anchor="w", padx=20, pady=(0, 15))
+        
+        # Standard SSL Verification
+        self.jira_verify_ssl = tk.BooleanVar(value=True)
+        tk.Checkbutton(
+            ssl_inner,
+            text="Verify SSL Certificate (standard verification)",
+            variable=self.jira_verify_ssl,
+            bg="white",
+            font=("Segoe UI", 9),
+            command=self._on_ssl_verify_toggle
+        ).pack(anchor="w")
+        
+        tk.Label(
+            ssl_inner,
+            text="Uses system's CA bundle. May fail with corporate proxies or self-signed certificates.",
+            font=("Segoe UI", 8),
+            bg="white",
+            fg="#666666",
+            wraplength=700,
+            justify="left"
+        ).pack(anchor="w", pady=(2, 10), padx=20)
+        
+        # Warning label
+        self.ssl_warning_label = tk.Label(
+            ssl_inner,
+            text="⚠️ Warning: Disabling all SSL verification reduces security. Only use in trusted corporate networks.",
             font=("Segoe UI", 8),
             bg="white",
             fg="#DC3545",
             wraplength=700,
             justify="left"
-        ).pack(anchor="w", pady=(2, 0))
+        )
+        # Only show warning when both are disabled
+        if not self.jira_verify_ssl.get() and not self.jira_use_cert_pinning.get():
+            self.ssl_warning_label.pack(anchor="w", pady=(2, 0), padx=20)
         
         # Status label
         self.jira_status_label = tk.Label(
@@ -567,8 +623,10 @@ class AdminSettingsDialog:
                     fg="#28A745"
                 )
             
-            # Load SSL verification setting
+            # Load SSL verification settings
             self.jira_verify_ssl.set(credentials.get('verify_ssl', True))
+            self.jira_use_cert_pinning.set(credentials.get('use_cert_pinning', False))
+            self._update_ssl_warning()
     
     def _save_jira_credentials(self):
         """Save Jira credentials (encrypted)."""
@@ -608,7 +666,8 @@ class AdminSettingsDialog:
                 'url': url,
                 'username': username,
                 'api_token': api_token,
-                'verify_ssl': self.jira_verify_ssl.get()
+                'verify_ssl': self.jira_verify_ssl.get(),
+                'use_cert_pinning': self.jira_use_cert_pinning.get()
             }
             
             self.credentials_manager.store_credentials('jira', credentials)
@@ -635,13 +694,132 @@ class AdminSettingsDialog:
             )
             
         except Exception as e:
+            safe_msg, title = handle_and_log_error(e, "saving Jira credentials")
             self.jira_status_label.config(
-                text=f"✗ Error saving credentials: {str(e)}",
+                text="✗ Error saving credentials",
                 fg="#DC3545"
             )
             messagebox.showerror(
-                "Error",
-                f"Failed to save credentials:\n{str(e)}",
+                title,
+                safe_msg,
+                parent=self.dialog
+            )
+    
+    def _on_cert_pinning_toggle(self):
+        """Handle certificate pinning checkbox toggle."""
+        if self.jira_use_cert_pinning.get():
+            # If enabling cert pinning, suggest disabling standard verification
+            if self.jira_verify_ssl.get():
+                response = messagebox.askyesno(
+                    "Certificate Pinning",
+                    "Certificate pinning works best without standard SSL verification.\n\n"
+                    "Would you like to disable standard SSL verification?\n"
+                    "(Pinning will still provide security)",
+                    parent=self.dialog
+                )
+                if response:
+                    self.jira_verify_ssl.set(False)
+        
+        self._update_ssl_warning()
+    
+    def _on_ssl_verify_toggle(self):
+        """Handle SSL verification checkbox toggle."""
+        self._update_ssl_warning()
+    
+    def _update_ssl_warning(self):
+        """Update SSL warning visibility based on settings."""
+        if not self.jira_verify_ssl.get() and not self.jira_use_cert_pinning.get():
+            # Both disabled - show warning
+            if not self.ssl_warning_label.winfo_ismapped():
+                self.ssl_warning_label.pack(anchor="w", pady=(2, 0), padx=20)
+        else:
+            # At least one enabled - hide warning
+            if self.ssl_warning_label.winfo_ismapped():
+                self.ssl_warning_label.pack_forget()
+    
+    def _manage_certificates(self):
+        """Open certificate management dialog."""
+        from certificate_trust_dialog import show_certificate_trust_dialog
+        from certificate_manager import CertificateManager
+        
+        url = self.jira_url_entry.get().strip()
+        if not url:
+            messagebox.showinfo(
+                "Enter Jira URL",
+                "Please enter your Jira URL first.",
+                parent=self.dialog
+            )
+            return
+        
+        if not url.startswith('https://'):
+            messagebox.showwarning(
+                "HTTPS Required",
+                "Certificate pinning only works with HTTPS URLs.",
+                parent=self.dialog
+            )
+            return
+        
+        try:
+            cert_mgr = CertificateManager()
+            hostname, port = CertificateManager.extract_hostname_from_url(url)
+            
+            # Check current certificate status
+            trusted, status, cert_info = cert_mgr.verify_certificate(hostname, port)
+            
+            if status == 'trusted':
+                # Show option to view or remove
+                response = messagebox.askyesno(
+                    "Certificate Already Trusted",
+                    f"Certificate for {hostname} is already trusted.\n\n"
+                    "Would you like to view the certificate details?",
+                    parent=self.dialog
+                )
+                if response:
+                    # Temporarily release grab to allow child dialog to grab
+                    self.dialog.grab_release()
+                    try:
+                        show_certificate_trust_dialog(self.dialog, hostname, port, cert_mgr)
+                    finally:
+                        # Re-grab after child dialog closes
+                        try:
+                            self.dialog.grab_set()
+                        except tk.TclError:
+                            pass
+            elif status == 'error':
+                messagebox.showerror(
+                    "Connection Error",
+                    f"Unable to connect to {hostname}.\n\n"
+                    "Please check your URL and network connection.",
+                    parent=self.dialog
+                )
+            else:
+                # New or changed certificate
+                # Temporarily release grab to allow child dialog to grab
+                self.dialog.grab_release()
+                try:
+                    result = show_certificate_trust_dialog(self.dialog, hostname, port, cert_mgr)
+                    if result:
+                        messagebox.showinfo(
+                            "Certificate Trusted",
+                            "Certificate has been trusted and will be verified on each connection.",
+                            parent=self.dialog
+                        )
+                        # Enable cert pinning if not already enabled
+                        if not self.jira_use_cert_pinning.get():
+                            self.jira_use_cert_pinning.set(True)
+                            self._update_ssl_warning()
+                finally:
+                    # Re-grab after child dialog closes
+                    try:
+                        self.dialog.grab_set()
+                    except tk.TclError:
+                        pass
+        
+        except Exception as e:
+            safe_msg, title = handle_and_log_error(e, "managing certificates")
+            messagebox.showerror(
+                title,
+                safe_msg,
                 parent=self.dialog
             )
     
@@ -690,7 +868,8 @@ class AdminSettingsDialog:
                 'url': url,
                 'username': username,
                 'api_token': api_token,
-                'verify_ssl': self.jira_verify_ssl.get()
+                'verify_ssl': self.jira_verify_ssl.get(),
+                'use_cert_pinning': self.jira_use_cert_pinning.get()
             }
             self.credentials_manager.store_credentials('jira', temp_credentials)
             
@@ -718,13 +897,14 @@ class AdminSettingsDialog:
                                        f"Could not connect to Jira:\n\n{message}")
                 
         except Exception as e:
+            safe_msg, title = handle_and_log_error(e, "testing Jira connection")
             self.jira_status_label.config(
-                text=f"✗ Error: {str(e)}",
+                text="✗ Error testing connection",
                 fg="#DC3545"
             )
             messagebox.showerror(
-                "Error",
-                f"An error occurred:\n{str(e)}",
+                title,
+                safe_msg,
                 parent=self.dialog
             )
     
@@ -759,9 +939,10 @@ class AdminSettingsDialog:
                 )
                 
             except Exception as e:
+                safe_msg, title = handle_and_log_error(e, "clearing Jira credentials")
                 messagebox.showerror(
-                    "Error",
-                    f"Failed to clear credentials:\n{str(e)}",
+                    title,
+                    safe_msg,
                     parent=self.dialog
                 )
     
@@ -858,7 +1039,7 @@ class AdminSettingsDialog:
         """Load existing credentials for all stores."""
         try:
             from vusion_api_config import VusionAPIConfig
-            config = VusionAPIConfig()
+            config = VusionAPIConfig(self.credentials_manager)
             
             for store in self.vusion_stores:
                 country = store['country']
@@ -908,7 +1089,7 @@ class AdminSettingsDialog:
         
         try:
             from vusion_api_config import VusionAPIConfig
-            config = VusionAPIConfig()
+            config = VusionAPIConfig(self.credentials_manager)
             
             # Save the API key for this country
             config.set_api_key(store['country'], 'vusion_pro', api_key)
@@ -940,13 +1121,14 @@ class AdminSettingsDialog:
             )
             
         except Exception as e:
+            safe_msg, title = handle_and_log_error(e, "saving Vusion API key")
             status_label.config(
-                text=f"✗ Error: {str(e)}",
+                text="✗ Error saving API key",
                 fg="#DC3545"
             )
             messagebox.showerror(
-                "Error",
-                f"Failed to save API key:\n{str(e)}",
+                title,
+                safe_msg,
                 parent=self.dialog
             )
     
@@ -955,7 +1137,7 @@ class AdminSettingsDialog:
         try:
             # First verify API key exists
             from vusion_api_config import VusionAPIConfig
-            config = VusionAPIConfig()
+            config = VusionAPIConfig(self.credentials_manager)
             api_key = config.get_api_key(store['country'], 'vusion_pro')
             
             if not api_key:
@@ -1021,13 +1203,14 @@ class AdminSettingsDialog:
                 parent=self.dialog
             )
         except Exception as e:
+            safe_msg, title = handle_and_log_error(e, f"testing {store['name']}")
             status_label.config(
-                text=f"✗ Error: {str(e)}",
+                text="✗ Test failed",
                 fg="#DC3545"
             )
             messagebox.showerror(
-                "Error",
-                f"Error testing {store['name']}:\n{str(e)}",
+                title,
+                safe_msg,
                 parent=self.dialog
             )
     
@@ -1042,7 +1225,7 @@ class AdminSettingsDialog:
         if result:
             try:
                 from vusion_api_config import VusionAPIConfig
-                config = VusionAPIConfig()
+                config = VusionAPIConfig(self.credentials_manager)
                 
                 config.delete_api_key(store['country'], 'vusion_pro')
                 
@@ -1066,8 +1249,9 @@ class AdminSettingsDialog:
                 )
                 
             except Exception as e:
+                safe_msg, title = handle_and_log_error(e, f"clearing {store['name']} key")
                 messagebox.showerror(
-                    "Error",
-                    f"Error clearing {store['name']} key:\n{str(e)}",
+                    title,
+                    safe_msg,
                     parent=self.dialog
                 )

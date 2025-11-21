@@ -14,6 +14,7 @@ from cryptography.fernet import Fernet
 import base64
 import hashlib
 import bcrypt
+from input_validator import InputValidator
 
 class DatabaseManager:
     """Manages VERA database with encryption for sensitive fields."""
@@ -496,6 +497,39 @@ class DatabaseManager:
     def add_access_point(self, ap_data: Dict) -> Tuple[bool, str]:
         """Add a new access point."""
         try:
+            # Validate inputs before processing
+            ap_id = ap_data.get('ap_id', '').strip()
+            valid, error_msg = InputValidator.ap_id(ap_id)
+            if not valid:
+                return False, f"Invalid AP ID: {error_msg}"
+            
+            # Validate IP address if provided
+            ip_address = ap_data.get('ip_address', '').strip()
+            if ip_address:
+                valid, error_msg = InputValidator.ip_address(ip_address)
+                if not valid:
+                    return False, f"Invalid IP address: {error_msg}"
+            
+            # Validate Store ID
+            store_id = ap_data.get('store_id', '').strip()
+            valid, error_msg = InputValidator.store_id(store_id)
+            if not valid:
+                return False, f"Invalid Store ID: {error_msg}"
+            
+            # Validate Store Alias (optional)
+            store_alias = ap_data.get('store_alias', '').strip()
+            if store_alias:
+                valid, error_msg = InputValidator.store_alias(store_alias)
+                if not valid:
+                    return False, f"Invalid Store Alias: {error_msg}"
+            
+            # Validate Notes (optional)
+            notes = ap_data.get('notes', '').strip()
+            if notes:
+                valid, error_msg = InputValidator.comment(notes, max_length=5000)
+                if not valid:
+                    return False, f"Invalid Notes: {error_msg}"
+            
             # Encrypt sensitive fields
             ap_data_encrypted = ap_data.copy()
             for field in self.ENCRYPTED_FIELDS:
@@ -567,6 +601,34 @@ class DatabaseManager:
     def update_access_point(self, ap_id: str, updates: Dict) -> Tuple[bool, str]:
         """Update access point fields."""
         try:
+            # Validate fields in updates
+            if 'ip_address' in updates:
+                ip_address = updates['ip_address'].strip()
+                if ip_address:  # Only validate if not empty
+                    valid, error_msg = InputValidator.ip_address(ip_address)
+                    if not valid:
+                        return False, f"Invalid IP address: {error_msg}"
+            
+            if 'store_id' in updates:
+                store_id = updates['store_id'].strip()
+                valid, error_msg = InputValidator.store_id(store_id)
+                if not valid:
+                    return False, f"Invalid Store ID: {error_msg}"
+            
+            if 'store_alias' in updates:
+                store_alias = updates['store_alias'].strip()
+                if store_alias:  # Only validate if not empty
+                    valid, error_msg = InputValidator.store_alias(store_alias)
+                    if not valid:
+                        return False, f"Invalid Store Alias: {error_msg}"
+            
+            if 'notes' in updates:
+                notes = updates['notes'].strip()
+                if notes:  # Only validate if not empty
+                    valid, error_msg = InputValidator.comment(notes, max_length=5000)
+                    if not valid:
+                        return False, f"Invalid Notes: {error_msg}"
+            
             # Encrypt sensitive fields in updates
             updates_encrypted = updates.copy()
             for field in self.ENCRYPTED_FIELDS:
@@ -836,6 +898,22 @@ class DatabaseManager:
                  email: str = None, created_by: str = None, is_active: bool = True) -> Tuple[bool, str]:
         """Add a new user with audit logging."""
         try:
+            # Validate username
+            valid, error_msg = InputValidator.username(username)
+            if not valid:
+                return False, f"Invalid username: {error_msg}"
+            
+            # Validate full name
+            valid, error_msg = InputValidator.full_name(full_name)
+            if not valid:
+                return False, f"Invalid full name: {error_msg}"
+            
+            # Validate email if provided
+            if email:
+                valid, error_msg = InputValidator.email(email)
+                if not valid:
+                    return False, f"Invalid email: {error_msg}"
+            
             with self._get_connection() as conn:
                 cursor = conn.cursor()
                 
@@ -871,6 +949,18 @@ class DatabaseManager:
                     updated_by: str = None) -> Tuple[bool, str]:
         """Update user information with audit logging."""
         try:
+            # Validate full name if being updated
+            if full_name is not None:
+                valid, error_msg = InputValidator.full_name(full_name)
+                if not valid:
+                    return False, f"Invalid full name: {error_msg}"
+            
+            # Validate email if being updated
+            if email is not None and email.strip():  # Only validate if not empty
+                valid, error_msg = InputValidator.email(email)
+                if not valid:
+                    return False, f"Invalid email: {error_msg}"
+            
             with self._get_connection() as conn:
                 cursor = conn.cursor()
                 

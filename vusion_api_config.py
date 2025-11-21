@@ -1,18 +1,16 @@
 """
 Vusion API Configuration Manager
 Handles multiple API keys and endpoints across different countries and services.
+Uses Windows DPAPI for secure credential storage.
 """
 
 import json
 from pathlib import Path
 from typing import Dict, Optional, List
-from cryptography.fernet import Fernet
-import base64
-import hashlib
 
 
 class VusionAPIConfig:
-    """Manages Vusion API configurations with encrypted API keys."""
+    """Manages Vusion API configurations with DPAPI-encrypted API keys."""
     
     # Supported countries
     COUNTRIES = ['NO', 'SE', 'FI', 'DK', 'IS', 'LAB']
@@ -72,81 +70,31 @@ class VusionAPIConfig:
         }
     }
     
-    def __init__(self, config_file: str = None):
-        if config_file is None:
-            config_file = Path.home() / ".vera_vusion_config.json"
-        self.config_file = Path(config_file)
-        self.key_file = Path.home() / ".vera_vusion_key"
-        self._cipher = self._get_cipher()
-        self._config = self._load_config()
-    
-    def _get_cipher(self):
-        """Get or create encryption cipher for API keys."""
-        if self.key_file.exists():
-            with open(self.key_file, 'rb') as f:
-                key = f.read()
-        else:
-            key = Fernet.generate_key()
-            with open(self.key_file, 'wb') as f:
-                f.write(key)
-            try:
-                import os
-                os.chmod(self.key_file, 0o600)
-            except:
-                pass
-        return Fernet(key)
-    
-    def _encrypt(self, value: str) -> str:
-        """Encrypt an API key."""
-        if not value:
-            return ''
-        return self._cipher.encrypt(value.encode()).decode()
-    
-    def _decrypt(self, encrypted: str) -> str:
-        """Decrypt an API key."""
-        if not encrypted:
-            return ''
-        try:
-            return self._cipher.decrypt(encrypted.encode()).decode()
-        except Exception:
-            return encrypted
-    
-    def _load_config(self) -> Dict:
-        """Load configuration from file."""
-        if self.config_file.exists():
-            with open(self.config_file, 'r') as f:
-                return json.load(f)
-        else:
-            # Create default structure
-            default_config = {
-                'api_keys': {},  # {country: {service: encrypted_key}}
-                'metadata': {
-                    'created': None,
-                    'last_updated': None,
-                }
-            }
-            self._save_config(default_config)
-            return default_config
-    
-    def _save_config(self, config: Dict = None):
-        """Save configuration to file."""
-        if config is None:
-            config = self._config
+    def __init__(self, credentials_manager=None):
+        """
+        Initialize Vusion API Config with DPAPI-based credential storage.
         
-        from datetime import datetime
-        if not config['metadata']['created']:
-            config['metadata']['created'] = datetime.now().isoformat()
-        config['metadata']['last_updated'] = datetime.now().isoformat()
-        
-        with open(self.config_file, 'w') as f:
-            json.dump(config, f, indent=2)
+        Args:
+            credentials_manager: CredentialsManager instance (will create if None)
+        """
+        if credentials_manager is None:
+            from database_manager import DatabaseManager
+            from credentials_manager import CredentialsManager
+            db = DatabaseManager()
+            self.credentials_manager = CredentialsManager(db)
+        else:
+            self.credentials_manager = credentials_manager
+    
+    def _get_service_key(self, country: str, service: str) -> str:
+        """Generate credential service key for storage."""
+        return f"vusion_{country}_{service}"
     
     def set_api_key(self, country: str, service: str, api_key: str) -> bool:
         """
-        Set API key for a country and service.
+        Set API key for a country and service (DPAPI-encrypted).
         
         Args:
-            country: Country code (NO, SE, FI, DK, IS)
+            country: Country code (NO, SE, FI, DK, IS, LAB)
             service: Service name (vusion_pro, vusion_cloud, vusion_retail)
             api_key: The API subscription key
         
@@ -159,20 +107,19 @@ class VusionAPIConfig:
         if service not in self.SERVICES:
             raise ValueError(f"Invalid service: {service}. Must be one of {list(self.SERVICES.keys())}")
         
-        # Initialize country dict if needed
-        if country not in self._config['api_keys']:
-            self._config['api_keys'][country] = {}
+        # Store using CredentialsManager with DPAPI
+        service_key = self._get_service_key(country, service)
+        self.credentials_manager.store_credentials(service_key, {
+            'api_key': api_key,
+            'country': country,
+            'service': service
+        })
         
-        # Encrypt and store
-        encrypted_key = self._encrypt(api_key)
-        self._config['api_keys'][country][service] = encrypted_key
-        
-        self._save_config()
         return True
     
     def get_api_key(self, country: str, service: str) -> Optional[str]:
         """
-        Get decrypted API key for a country and service.
+        Get DPAPI-decrypted API key for a country and service.
         
         Args:
             country: Country code
@@ -181,37 +128,50 @@ class VusionAPIConfig:
         Returns:
             Decrypted API key or None if not found
         """
-        if country not in self._config['api_keys']:
-            return None
+        service_key = self._get_service_key(country, service)
+        credentials = self.credentials_manager.get_credentials(service_key)
         
-        if service not in self._config['api_keys'][country]:
-            return None
+        if credentials and 'api_key' in credentials:
+            return credentials['api_key']
         
-        encrypted_key = self._config['api_keys'][country][service]
-        return self._decrypt(encrypted_key)
+        return None
     
     def get_all_keys(self) -> Dict[str, Dict[str, str]]:
         """
-        Get all API keys (decrypted) organized by country and service.
+        Get all API keys (DPAPI-decrypted) organized by country and service.
         
         Returns:
             Dict of {country: {service: api_key}}
         """
         result = {}
-        for country in self._config['api_keys']:
-            result[country] = {}
-            for service in self._config['api_keys'][country]:
-                result[country][service] = self.get_api_key(country, service)
+        
+        # Get all Vusion-related credentials
+        all_services = self.credentials_manager.get_all_services()
+        
+        for service_info in all_services:
+            service_name = service_info['service_name']
+            
+            # Only process Vusion credentials
+            if service_name.startswith('vusion_'):
+                credentials = self.credentials_manager.get_credentials(service_name)
+                
+                if credentials and 'country' in credentials and 'service' in credentials:
+                    country = credentials['country']
+                    service = credentials['service']
+                    api_key = credentials.get('api_key')
+                    
+                    if country not in result:
+                        result[country] = {}
+                    
+                    result[country][service] = api_key
+        
         return result
     
     def delete_api_key(self, country: str, service: str) -> bool:
-        """Delete an API key."""
-        if country in self._config['api_keys']:
-            if service in self._config['api_keys'][country]:
-                del self._config['api_keys'][country][service]
-                self._save_config()
-                return True
-        return False
+        """Delete an API key from DPAPI storage."""
+        service_key = self._get_service_key(country, service)
+        self.credentials_manager.delete_credentials(service_key)
+        return True
     
     def get_endpoint_url(self, service: str, endpoint: str, **kwargs) -> str:
         """
@@ -299,14 +259,18 @@ class VusionAPIConfig:
             List of dicts with country, service, and status
         """
         result = []
-        for country in self._config['api_keys']:
-            for service in self._config['api_keys'][country]:
-                result.append({
-                    'country': country,
-                    'service': service,
-                    'service_name': self.SERVICES[service]['name'],
-                    'configured': True
-                })
+        all_keys = self.get_all_keys()
+        
+        for country in all_keys:
+            for service in all_keys[country]:
+                if service in self.SERVICES:
+                    result.append({
+                        'country': country,
+                        'service': service,
+                        'service_name': self.SERVICES[service]['name'],
+                        'configured': True
+                    })
+        
         return result
 
 

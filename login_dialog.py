@@ -93,7 +93,6 @@ class LoginDialog:
         self.username_entry = tk.Entry(username_container, font=('Segoe UI', 11),
                                        bg="#F8F9FA", fg="#212529", relief=tk.FLAT, bd=0)
         self.username_entry.pack(fill=tk.X, padx=12, pady=10)
-        self.username_entry.insert(0, "peterander")  # Pre-fill for testing
         
         # Password field
         tk.Label(content, text="Password", font=('Segoe UI', 9, 'bold'),
@@ -105,7 +104,6 @@ class LoginDialog:
         self.password_entry = tk.Entry(password_container, show="●", font=('Segoe UI', 11),
                                        bg="#F8F9FA", fg="#212529", relief=tk.FLAT, bd=0)
         self.password_entry.pack(fill=tk.X, padx=12, pady=10)
-        self.password_entry.insert(0, "Test1234567890")  # Pre-fill for testing
         
         # Show password checkbox
         self.show_password_var = tk.BooleanVar(value=False)

@@ -9,6 +9,7 @@ from typing import Optional
 from database_manager import DatabaseManager
 from jira_integration import JiraIntegration
 from jira_db_manager import JiraDBManager
+from error_sanitizer import handle_and_log_error
 
 
 class JiraSearchWindow:
@@ -303,7 +304,7 @@ class JiraSearchWindow:
                 stored_count += 1
             except Exception as e:
                 failed_issues.append(issue_key)
-                print(f"Error storing issue {issue_key}: {e}")
+                safe_msg, _ = handle_and_log_error(e, f"storing issue {issue_key}")
         
         status_msg = f"Found {len(issues)} issues, stored {stored_count} in database"
         if failed_issues:
@@ -633,10 +634,9 @@ class JiraSearchWindow:
             self._display_cached_issues(search_terms[0])
             
         except Exception as e:
-            self._set_status(f"Error storing ticket: {str(e)}", "red")
-            messagebox.showerror("Storage Error", 
-                               f"Fetched ticket but failed to store:\n{str(e)}",
-                               parent=self.window)
+            safe_msg, title = handle_and_log_error(e, "storing ticket")
+            self._set_status(f"Error storing ticket", "red")
+            messagebox.showerror(title, safe_msg, parent=self.window)
 
 
 def open_jira_search(parent, db_manager: DatabaseManager, ap_id: str = ""):
