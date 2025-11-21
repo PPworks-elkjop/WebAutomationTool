@@ -16,8 +16,11 @@ class ModernUserManager:
         self.current_user = current_user
         self.db_manager = db_manager if db_manager else None
         
+        print(f"DEBUG: ModernUserManager init - db_manager type: {type(db_manager)}, is None: {db_manager is None}")
+        
         # If db_manager is provided, use it; otherwise create new UserManager
         if db_manager:
+            print("DEBUG: Creating UserManagerWrapper")
             # Create a wrapper that mimics UserManager interface
             class UserManagerWrapper:
                 def __init__(self, db):
@@ -48,8 +51,11 @@ class ModernUserManager:
                     return self.db.get_user_audit_log(target_username, actor_username, limit)
             
             self.user_manager = UserManagerWrapper(db_manager)
+            print(f"DEBUG: user_manager created, type: {type(self.user_manager)}, has db: {hasattr(self.user_manager, 'db')}")
         else:
+            print("DEBUG: Creating new UserManager()")
             self.user_manager = UserManager()
+            print(f"DEBUG: user_manager created, type: {type(self.user_manager)}")
         
         if parent:
             self.root = tk.Toplevel(parent)
