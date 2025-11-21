@@ -29,6 +29,9 @@ class ModernUserManager:
                 def get_user(self, username):
                     return self.db.get_user(username)
                 
+                def find_by_username(self, username):
+                    return self.db.get_user(username)
+                
                 def add_user(self, username, full_name, password, role, created_by):
                     return self.db.add_user(username, full_name, password, role, created_by)
                 
