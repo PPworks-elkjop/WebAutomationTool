@@ -128,10 +128,6 @@ class JiraAPI:
         if not self.is_configured():
             return False, "Jira credentials not configured"
         
-        # Debug output
-        print(f"DEBUG - Testing connection to: {self._base_url}/rest/api/3/myself")
-        print(f"DEBUG - Using username: {self._session.auth.username if self._session.auth else 'None'}")
-        
         try:
             response = self._session.get(f"{self._base_url}/rest/api/3/myself", timeout=10)
             

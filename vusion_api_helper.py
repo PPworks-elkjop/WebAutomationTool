@@ -373,6 +373,62 @@ class VusionAPIHelper:
         
         online = status == 'ONLINE'
         return True, online
+    
+    def get_events(self, country: str, store_id: str, search: str = None, page: int = 1, page_size: int = 50) -> Tuple[bool, Any]:
+        """
+        Get events for a store or specific transmitter.
+        
+        Args:
+            country: Country code (e.g., 'LAB', 'SE', 'NO')
+            store_id: Store ID (e.g., 'elkjop_se_lab.lab5')
+            search: Optional transmitter ID to filter events
+            page: Page number (default: 1)
+            page_size: Number of events per page (default: 50)
+        
+        Returns:
+            Tuple of (success: bool, data: dict or error_message: str)
+            
+            The returned data includes:
+            data['content'] - list of events
+            data['totalElements'] - total number of events
+            data['totalPages'] - total number of pages
+        
+        Example:
+            success, data = helper.get_events('LAB', 'elkjop_se_lab.lab5', search='201078')
+            if success:
+                for event in data['content']:
+                    print(f"{event['eventType']}: {event['status']}")
+        """
+        try:
+            # Build URL with query parameters
+            url = self.config.get_endpoint_url('vusion_pro', 'events', storeId=store_id)
+            
+            # Add query parameters
+            params = []
+            if search:
+                params.append(f'search={search}')
+            params.append(f'page={page}')
+            params.append(f'pageSize={page_size}')
+            
+            if params:
+                url += '?' + '&'.join(params)
+            
+            headers = self.config.get_request_headers(country, 'vusion_pro')
+            
+            req = urllib.request.Request(url, headers=headers)
+            req.get_method = lambda: 'GET'
+            
+            with urllib.request.urlopen(req, timeout=30) as response:
+                if response.getcode() == 200:
+                    data = json.loads(response.read().decode('utf-8'))
+                    return True, data
+                else:
+                    return False, f"HTTP {response.getcode()}"
+        
+        except urllib.error.HTTPError as e:
+            return False, f"HTTP {e.code}: {e.reason}"
+        except Exception as e:
+            return False, str(e)
 
 
 if __name__ == '__main__':

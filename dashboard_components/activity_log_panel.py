@@ -50,8 +50,8 @@ class ActivityLogPanel:
         tk.Label(filter_frame, text="Filter:", font=('Segoe UI', 10),
                 bg="#E9ECEF", fg="#495057").pack(side=tk.LEFT, padx=15, pady=8)
         
-        # Create checkbox variables
-        self.filter_info = tk.BooleanVar(value=True)
+        # Create checkbox variables (Info unchecked by default to reduce noise)
+        self.filter_info = tk.BooleanVar(value=False)
         self.filter_success = tk.BooleanVar(value=True)
         self.filter_warning = tk.BooleanVar(value=True)
         self.filter_error = tk.BooleanVar(value=True)

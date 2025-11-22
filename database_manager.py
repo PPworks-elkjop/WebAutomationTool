@@ -785,11 +785,13 @@ class DatabaseManager:
             if 'macAddress' in vusion_data:
                 updates['mac_address'] = vusion_data['macAddress']
             
-            if 'lastOfflineDate' in vusion_data:
-                updates['vusion_last_offline_date'] = vusion_data['lastOfflineDate']
-            
-            if 'lastOnlineDate' in vusion_data:
-                updates['vusion_last_online_date'] = vusion_data['lastOnlineDate']
+            # Get dates from connectivity object
+            if 'connectivity' in vusion_data:
+                connectivity = vusion_data['connectivity']
+                if 'lastOfflineDate' in connectivity:
+                    updates['vusion_last_offline_date'] = connectivity['lastOfflineDate']
+                if 'lastOnlineDate' in connectivity:
+                    updates['vusion_last_online_date'] = connectivity['lastOnlineDate']
             
             if 'comment' in vusion_data:
                 updates['vusion_comment'] = vusion_data['comment']

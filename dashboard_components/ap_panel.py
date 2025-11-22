@@ -771,15 +771,19 @@ class APPanel:
         vusion_frame = tk.Frame(content, bg="#F8F9FA", relief=tk.SOLID, borderwidth=1)
         vusion_frame.pack(fill=tk.X, pady=(0, 15))
         
+        # Store label references for updating
+        if 'vusion_labels' not in ap_data:
+            ap_data['vusion_labels'] = {}
+        
         vusion_data = [
-            [('Display Name', ap_data.get('vusion_display_name', 'N/A')),
-             ('Information', ap_data.get('vusion_information', 'N/A'))],
-            [('Comment', ap_data.get('vusion_comment', 'N/A')),
-             ('Status', ap_data.get('vusion_status', 'N/A'))],
-            [('Created', ap_data.get('vusion_creation_date', 'N/A')[:19] if ap_data.get('vusion_creation_date') else 'N/A'),
-             ('Modified', ap_data.get('vusion_modification_date', 'N/A')[:19] if ap_data.get('vusion_modification_date') else 'N/A')],
-            [('Last Online', ap_data.get('vusion_last_online_date', 'N/A')[:19] if ap_data.get('vusion_last_online_date') else 'N/A'),
-             ('Last Offline', ap_data.get('vusion_last_offline_date', 'N/A')[:19] if ap_data.get('vusion_last_offline_date') else 'N/A')]
+            [('Display Name', ap_data.get('vusion_display_name', 'N/A'), 'vusion_display_name'),
+             ('Information', ap_data.get('vusion_information', 'N/A'), 'vusion_information')],
+            [('Comment', ap_data.get('vusion_comment', 'N/A'), 'vusion_comment'),
+             ('Status', ap_data.get('vusion_status', 'N/A'), 'vusion_status')],
+            [('Created', ap_data.get('vusion_creation_date', 'N/A')[:19] if ap_data.get('vusion_creation_date') else 'N/A', 'vusion_creation_date'),
+             ('Modified', ap_data.get('vusion_modification_date', 'N/A')[:19] if ap_data.get('vusion_modification_date') else 'N/A', 'vusion_modification_date')],
+            [('Last Online', ap_data.get('vusion_last_online_date', 'N/A')[:19] if ap_data.get('vusion_last_online_date') else 'N/A', 'vusion_last_online_date'),
+             ('Last Offline', ap_data.get('vusion_last_offline_date', 'N/A')[:19] if ap_data.get('vusion_last_offline_date') else 'N/A', 'vusion_last_offline_date')]
         ]
         
         vusion_container = tk.Frame(vusion_frame, bg="#F8F9FA")
@@ -792,7 +796,7 @@ class APPanel:
         vusion_container.grid_columnconfigure(3, weight=1, minsize=150)
         
         for row_idx, row_data in enumerate(vusion_data):
-            for col_idx, (label, value) in enumerate(row_data):
+            for col_idx, (label, value, field_name) in enumerate(row_data):
                 col_offset = col_idx * 2
                 
                 # Label
@@ -805,6 +809,9 @@ class APPanel:
                 value_label = tk.Label(vusion_container, text=value_str, font=('Segoe UI', 9),
                         bg="#F8F9FA", fg="#212529", anchor="w", cursor="hand2")
                 value_label.grid(row=row_idx, column=col_offset+1, sticky="w", padx=(0, 20), pady=3)
+                
+                # Store reference to label for updating
+                ap_data['vusion_labels'][field_name] = value_label
                 
                 # Click to copy
                 def make_copy_func_v(v):
@@ -1074,6 +1081,7 @@ class APPanel:
                             # Update UI in main thread
                             if 'overview_status_label' in ap_data:
                                 def update_ui():
+                                    # Update status badge
                                     if status == 'ONLINE':
                                         ap_data['overview_status_label'].config(
                                             text="ONLINE",
@@ -1087,8 +1095,49 @@ class APPanel:
                                             fg="white"
                                         )
                                     
+                                    # Update Vusion data in ap_data dictionary
+                                    ap_data['vusion_display_name'] = transmitter.get('displayName', 'N/A')
+                                    ap_data['vusion_information'] = transmitter.get('informations', 'N/A')
+                                    ap_data['vusion_comment'] = transmitter.get('comment', 'N/A')
+                                    ap_data['vusion_status'] = status
+                                    ap_data['vusion_creation_date'] = transmitter.get('creationDate', 'N/A')
+                                    ap_data['vusion_modification_date'] = transmitter.get('modificationDate', 'N/A')
+                                    # Get dates from connectivity object
+                                    ap_data['vusion_last_online_date'] = connectivity.get('lastOnlineDate', 'N/A')
+                                    ap_data['vusion_last_offline_date'] = connectivity.get('lastOfflineDate', 'N/A')
+                                    
+                                    # Update Vusion data labels if they exist
+                                    if 'vusion_labels' in ap_data:
+                                        labels = ap_data['vusion_labels']
+                                        if 'vusion_display_name' in labels:
+                                            labels['vusion_display_name'].config(text=ap_data['vusion_display_name'])
+                                        if 'vusion_information' in labels:
+                                            labels['vusion_information'].config(text=ap_data['vusion_information'])
+                                        if 'vusion_comment' in labels:
+                                            labels['vusion_comment'].config(text=ap_data['vusion_comment'])
+                                        if 'vusion_status' in labels:
+                                            labels['vusion_status'].config(text=ap_data['vusion_status'])
+                                        if 'vusion_creation_date' in labels:
+                                            date_val = ap_data['vusion_creation_date'][:19] if ap_data['vusion_creation_date'] and ap_data['vusion_creation_date'] != 'N/A' else 'N/A'
+                                            labels['vusion_creation_date'].config(text=date_val)
+                                        if 'vusion_modification_date' in labels:
+                                            date_val = ap_data['vusion_modification_date'][:19] if ap_data['vusion_modification_date'] and ap_data['vusion_modification_date'] != 'N/A' else 'N/A'
+                                            labels['vusion_modification_date'].config(text=date_val)
+                                        if 'vusion_last_online_date' in labels:
+                                            date_val = ap_data['vusion_last_online_date'][:19] if ap_data['vusion_last_online_date'] and ap_data['vusion_last_online_date'] != 'N/A' else 'N/A'
+                                            labels['vusion_last_online_date'].config(text=date_val)
+                                        if 'vusion_last_offline_date' in labels:
+                                            date_val = ap_data['vusion_last_offline_date'][:19] if ap_data['vusion_last_offline_date'] and ap_data['vusion_last_offline_date'] != 'N/A' else 'N/A'
+                                            labels['vusion_last_offline_date'].config(text=date_val)
+                                    
                                     # Also store full transmitter data for database update
                                     self._save_vusion_data_to_db(ap_id, transmitter)
+                                    
+                                    # Refresh content panel if it's showing this AP's overview
+                                    if self.content_panel and self.content_panel.current_content_type == "ap_overview":
+                                        current_ap = self.content_panel.current_data
+                                        if current_ap and current_ap.get('ap_id') == ap_id:
+                                            self.content_panel.show_ap_overview(ap_data)
                                 
                                 self.parent.after(0, update_ui)
                             break
@@ -1127,9 +1176,7 @@ class APPanel:
             # Update Vusion data in database
             success, message = db.update_vusion_data(ap_id, transmitter_data)
             
-            if success:
-                print(f"Vusion data saved for {ap_id}")
-            else:
+            if not success:
                 print(f"Failed to save Vusion data for {ap_id}: {message}")
         except Exception as e:
             print(f"Error saving Vusion data to database: {e}")

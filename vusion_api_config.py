@@ -26,6 +26,7 @@ class VusionAPIConfig:
                 'gateways': '/stores/{storeId}/gateways',
                 'templates': '/stores/{storeId}/templates',
                 'transmitters': '/stores/{storeId}/transmitters',
+                'events': '/stores/{storeId}/events',
             }
         },
         'vusion_cloud': {

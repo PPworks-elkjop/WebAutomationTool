@@ -287,15 +287,90 @@ class ContextPanel:
                 font=('Segoe UI', 10, 'italic'), bg="#FFFFFF", fg="#6C757D").pack(expand=True)
         
         # Content frame (initially hidden)
-        self.vusion_content_frame = tk.Frame(frame, bg="#FFFFFF", padx=20, pady=15)
+        self.vusion_content_frame = tk.Frame(frame, bg="#FFFFFF")
         
-        tk.Label(self.vusion_content_frame, text="Vusion Integration Data", font=('Segoe UI', 12, 'bold'),
-                bg="#FFFFFF", fg="#212529").pack(anchor="w", pady=(0, 10))
+        # Filters panel
+        filters_frame = tk.Frame(self.vusion_content_frame, bg="#F8F9FA", padx=10, pady=10)
+        filters_frame.pack(fill=tk.X, padx=5, pady=5)
         
-        # Placeholder for Vusion data
-        self.vusion_text = scrolledtext.ScrolledText(self.vusion_content_frame, font=('Segoe UI', 9),
-                                                      wrap=tk.WORD, height=20)
-        self.vusion_text.pack(fill=tk.BOTH, expand=True)
+        # Top row with title and buttons
+        top_row = tk.Frame(filters_frame, bg="#F8F9FA")
+        top_row.pack(fill=tk.X, pady=(0, 10))
+        
+        tk.Label(top_row, text="Event Filters", font=('Segoe UI', 11, 'bold'),
+                bg="#F8F9FA", fg="#212529").pack(side=tk.LEFT)
+        
+        tk.Button(top_row, text="🔄 Refresh", command=self._refresh_vusion_events,
+                 bg="#6C757D", fg="white", font=('Segoe UI', 9),
+                 padx=12, pady=6, relief=tk.FLAT, cursor="hand2",
+                 borderwidth=0).pack(side=tk.RIGHT)
+        
+        tk.Button(top_row, text="📊 Export to Excel", command=self._export_vusion_to_excel,
+                 bg="#28A745", fg="white", font=('Segoe UI', 9),
+                 padx=12, pady=6, relief=tk.FLAT, cursor="hand2",
+                 borderwidth=0).pack(side=tk.RIGHT, padx=(0, 5))
+        
+        tk.Button(top_row, text="📋 Copy Table", command=self._copy_vusion_table,
+                 bg="#007BFF", fg="white", font=('Segoe UI', 9),
+                 padx=12, pady=6, relief=tk.FLAT, cursor="hand2",
+                 borderwidth=0).pack(side=tk.RIGHT, padx=(0, 5))
+        
+        # Event type filters
+        filter_row = tk.Frame(filters_frame, bg="#F8F9FA")
+        filter_row.pack(fill=tk.X)
+        
+        tk.Label(filter_row, text="Event Type:", font=('Segoe UI', 9, 'bold'),
+                bg="#F8F9FA", fg="#495057").pack(side=tk.LEFT, padx=(0, 10))
+        
+        # Checkboxes for event types
+        self.vusion_event_types = {}
+        self.vusion_event_checkboxes_frame = tk.Frame(filter_row, bg="#F8F9FA")
+        self.vusion_event_checkboxes_frame.pack(side=tk.LEFT, fill=tk.X, expand=True)
+        
+        for event_type in ['Transmitter Connectivity', 'Transmitter Configuration']:
+            var = tk.BooleanVar(value=True)
+            self.vusion_event_types[event_type] = var
+            # Add command to refresh display when filter changes
+            var.trace_add('write', lambda *args: self._apply_vusion_filters())
+            self._create_custom_checkbox(self.vusion_event_checkboxes_frame, event_type, var)
+        
+        # Events table
+        table_container = tk.Frame(self.vusion_content_frame, bg="#FFFFFF")
+        table_container.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
+        
+        # Create canvas for scrolling (vertical only, table adapts to width)
+        canvas = tk.Canvas(table_container, bg="#FFFFFF", highlightthickness=0)
+        scrollbar_y = tk.Scrollbar(table_container, orient="vertical", command=canvas.yview)
+        
+        self.vusion_events_frame = tk.Frame(canvas, bg="#FFFFFF")
+        
+        # Configure canvas to resize frame to fit width
+        def _configure_canvas(event):
+            canvas.configure(scrollregion=canvas.bbox("all"))
+            # Make the frame fill the canvas width
+            canvas_width = event.width
+            canvas.itemconfig(self.vusion_canvas_window, width=canvas_width)
+        
+        self.vusion_events_frame.bind("<Configure>", lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
+        self.vusion_canvas_window = canvas.create_window((0, 0), window=self.vusion_events_frame, anchor="nw")
+        canvas.configure(yscrollcommand=scrollbar_y.set)
+        canvas.bind("<Configure>", _configure_canvas)
+        
+        canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        scrollbar_y.pack(side=tk.RIGHT, fill=tk.Y)
+        
+        # Store canvas reference
+        self.vusion_canvas = canvas
+        
+        # Mouse wheel scrolling
+        def _on_mousewheel(event):
+            canvas.yview_scroll(int(-1*(event.delta/120)), "units")
+        
+        canvas.bind("<Enter>", lambda e: canvas.bind("<MouseWheel>", _on_mousewheel))
+        canvas.bind("<Leave>", lambda e: canvas.unbind("<MouseWheel>"))
+        
+        # Store events data
+        self.vusion_events = []
     
     def set_active_ap(self, ap_id, ap_data):
         """Update context panel for a new active AP."""
@@ -771,7 +846,7 @@ class ContextPanel:
         summary_label.bind("<Button-1>", on_click)
     
     def _load_vusion_data(self):
-        """Load Vusion integration data for active AP."""
+        """Load Vusion events for active AP."""
         if not self.active_ap_data:
             # Show placeholder, hide content
             self.vusion_content_frame.pack_forget()
@@ -782,27 +857,452 @@ class ContextPanel:
         self.vusion_placeholder_frame.pack_forget()
         self.vusion_content_frame.pack(fill=tk.BOTH, expand=True)
         
-        self.vusion_text.delete('1.0', tk.END)
+        # Load events in background thread
+        self._load_vusion_events_background()
+    
+    def _load_vusion_events_background(self):
+        """Load Vusion events asynchronously."""
+        # Show loading message
+        for widget in self.vusion_events_frame.winfo_children():
+            widget.destroy()
         
-        # Display AP store/integration info
-        store_id = self.active_ap_data.get('store_id', 'N/A')
+        loading_label = tk.Label(self.vusion_events_frame, 
+                                text="🔄 Loading Vusion events...",
+                                font=('Segoe UI', 10), bg="#FFFFFF", fg="#6C757D")
+        loading_label.pack(pady=20)
         
-        vusion_info = f"""Vusion Integration Status
+        # Load in background thread
+        import threading
+        thread = threading.Thread(target=self._load_vusion_events_thread, daemon=True)
+        thread.start()
+    
+    def _load_vusion_events_thread(self):
+        """Background thread to load Vusion events."""
+        try:
+            from vusion_api_helper import VusionAPIHelper
+            from vusion_api_config import VusionAPIConfig
+            
+            store_id = self.active_ap_data.get('store_id', '')
+            if not store_id:
+                self.parent.after(0, lambda: self._show_vusion_error("No store ID available"))
+                return
+            
+            # Parse country from store_id
+            country = self._get_country_from_store_id(store_id)
+            if not country:
+                self.parent.after(0, lambda: self._show_vusion_error("Could not determine country from store ID"))
+                return
+            
+            # Check if API key is configured
+            config = VusionAPIConfig()
+            api_key = config.get_api_key(country, 'vusion_pro')
+            if not api_key:
+                self.parent.after(0, lambda: self._show_vusion_error("Vusion API not configured for this country"))
+                return
+            
+            # Get events from Vusion API
+            helper = VusionAPIHelper()
+            success, result = helper.get_events(country, store_id, search=self.active_ap, page_size=100)
+            
+            if success and isinstance(result, dict):
+                # The API returns events in 'values' array, not 'content'
+                events = result.get('values', [])
+                self.parent.after(0, lambda: self._display_vusion_events(events))
+            else:
+                error_msg = result if isinstance(result, str) else "Failed to load events"
+                self.parent.after(0, lambda msg=error_msg: self._show_vusion_error(msg))
         
-Store ID: {store_id}
-AP ID: {self.active_ap}
+        except Exception as e:
+            self.parent.after(0, lambda: self._show_vusion_error(f"Error: {str(e)}"))
+    
+    def _get_country_from_store_id(self, store_id):
+        """Parse country code from store_id."""
+        if not store_id:
+            return None
         
-Integration Data:
-- Status: Active
-- Last Sync: 2025-11-16 12:00:00
-- Labels Synced: 1,234
-- Errors: 0
-
-TODO: Implement actual Vusion API integration
-"""
+        store_lower = store_id.lower()
         
-        self.vusion_text.insert('1.0', vusion_info)
-        self._log("Vusion data loaded")
+        # Check for lab environment first
+        if 'elkjop_se_lab' in store_lower:
+            return 'LAB'
+        
+        # Parse country from store_id pattern
+        if '_no' in store_lower:
+            return 'NO'
+        elif '_se' in store_lower:
+            return 'SE'
+        elif '_fi' in store_lower:
+            return 'FI'
+        elif '_dk' in store_lower:
+            return 'DK'
+        elif '_is' in store_lower:
+            return 'IS'
+        
+        return None
+    
+    def _display_vusion_events(self, events):
+        """Display Vusion events in the table."""
+        # Clear existing content
+        for widget in self.vusion_events_frame.winfo_children():
+            widget.destroy()
+        
+        self.vusion_events = events
+        
+        if not events:
+            tk.Label(self.vusion_events_frame, text="No events found for this AP",
+                    font=('Segoe UI', 10, 'italic'), bg="#FFFFFF", fg="#6C757D").pack(pady=20)
+            return
+        
+        # Apply filters
+        filtered_events = self._filter_vusion_events(events)
+        
+        if not filtered_events:
+            tk.Label(self.vusion_events_frame, text="No events match the selected filters",
+                    font=('Segoe UI', 10, 'italic'), bg="#FFFFFF", fg="#6C757D").pack(pady=20)
+            return
+        
+        # Create table header
+        header_frame = tk.Frame(self.vusion_events_frame, bg="#E9ECEF", relief=tk.SOLID, borderwidth=1)
+        header_frame.pack(fill=tk.X, padx=0, pady=(0, 0))
+        
+        # Configure grid columns
+        header_frame.grid_columnconfigure(0, weight=2, minsize=150)  # Date
+        header_frame.grid_columnconfigure(1, weight=2, minsize=200)  # Event Type
+        header_frame.grid_columnconfigure(2, weight=1, minsize=100)  # Status
+        header_frame.grid_columnconfigure(3, weight=4, minsize=300)  # Message
+        
+        # Header labels
+        headers = [
+            ('Date', 0),
+            ('Event Type', 1),
+            ('Status', 2),
+            ('Message', 3)
+        ]
+        
+        for header_text, col in headers:
+            tk.Label(header_frame, text=header_text, font=('Segoe UI', 9, 'bold'),
+                    bg="#E9ECEF", fg="#212529", anchor="w", padx=10, pady=8).grid(
+                        row=0, column=col, sticky="ew")
+        
+        # Create event rows
+        for idx, event in enumerate(filtered_events):
+            self._create_vusion_event_row(self.vusion_events_frame, event, idx)
+        
+        self._log(f"Loaded {len(filtered_events)} Vusion events (filtered from {len(events)})")
+    
+    def _filter_vusion_events(self, events):
+        """Filter events based on selected event types."""
+        filtered = []
+        
+        # Get selected event types (UI names)
+        selected_types = [et for et, var in self.vusion_event_types.items() if var.get()]
+        
+        # Map UI names to API event types
+        type_mapping = {
+            'Transmitter Connectivity': 'TRANSMITTER_CONNECTIVITY',
+            'Transmitter Configuration': 'TRANSMITTER_CONFIGURATION'
+        }
+        
+        # Convert to API event type names
+        selected_api_types = [type_mapping.get(st, st) for st in selected_types]
+        
+        for event in events:
+            event_type = event.get('eventType', '')
+            
+            # Check if event type matches any selected filter
+            if event_type in selected_api_types:
+                filtered.append(event)
+        
+        return filtered
+    
+    def _create_vusion_event_row(self, parent, event, index):
+        """Create a row for a Vusion event."""
+        # Alternate row colors
+        bg_color = "#FFFFFF" if index % 2 == 0 else "#F8F9FA"
+        
+        row_frame = tk.Frame(parent, bg=bg_color, relief=tk.SOLID, borderwidth=1)
+        row_frame.pack(fill=tk.X, padx=0, pady=0)
+        
+        # Configure grid columns (same as header)
+        row_frame.grid_columnconfigure(0, weight=2, minsize=150)
+        row_frame.grid_columnconfigure(1, weight=2, minsize=200)
+        row_frame.grid_columnconfigure(2, weight=1, minsize=100)
+        row_frame.grid_columnconfigure(3, weight=4, minsize=300)
+        
+        # Extract event data
+        # API uses 'creationDate' not 'eventDate'
+        date_str = event.get('creationDate', 'N/A')
+        if date_str != 'N/A' and 'T' in date_str:
+            # Format: 2025-11-19T17:42:01.207Z -> 2025-11-19 17:42:01
+            date_str = date_str.replace('T', ' ').split('.')[0]
+        
+        # Convert API event type to user-friendly format
+        event_type_raw = event.get('eventType', 'N/A')
+        # Convert TRANSMITTER_CONNECTIVITY to "Transmitter Connectivity"
+        event_type = event_type_raw.replace('_', ' ').title() if event_type_raw != 'N/A' else 'N/A'
+        
+        # Status might not be present in all events, derive from modifications if needed
+        status = event.get('status', '')
+        if not status and 'modifications' in event:
+            # For connectivity events, show the new connectivity status
+            new_val = event.get('modifications', {}).get('newValue', {})
+            if 'connectivity.status' in new_val:
+                status = new_val['connectivity.status']
+        if not status:
+            status = 'N/A'
+        
+        message = event.get('message', 'N/A')
+        
+        # Create labels with wrapping for long text
+        date_label = tk.Label(row_frame, text=date_str, font=('Segoe UI', 9),
+                             bg=bg_color, fg="#212529", anchor="nw", justify=tk.LEFT,
+                             wraplength=140, padx=10, pady=8)
+        date_label.grid(row=0, column=0, sticky="new")
+        
+        type_label = tk.Label(row_frame, text=event_type, font=('Segoe UI', 9),
+                             bg=bg_color, fg="#212529", anchor="nw", justify=tk.LEFT,
+                             wraplength=190, padx=10, pady=8)
+        type_label.grid(row=0, column=1, sticky="new")
+        
+        # Status with color coding
+        status_upper = status.upper()
+        if status_upper == "ONLINE" or status_upper == "SUCCESS":
+            status_color = "#28A745"  # Green
+        elif status_upper == "OFFLINE" or status_upper == "ERROR":
+            status_color = "#DC3545"  # Red
+        else:
+            status_color = "#6C757D"  # Gray
+        
+        status_label = tk.Label(row_frame, text=status, font=('Segoe UI', 9, 'bold'),
+                               bg=bg_color, fg=status_color, anchor="nw", justify=tk.LEFT,
+                               wraplength=90, padx=10, pady=8)
+        status_label.grid(row=0, column=2, sticky="new")
+        
+        message_label = tk.Label(row_frame, text=message, font=('Segoe UI', 9),
+                                bg=bg_color, fg="#212529", anchor="nw", justify=tk.LEFT,
+                                wraplength=290, padx=10, pady=8, cursor="hand2")
+        message_label.grid(row=0, column=3, sticky="new")
+        
+        # Make labels copyable
+        for label, value in [(date_label, date_str), (type_label, event_type), 
+                            (status_label, status), (message_label, message)]:
+            self._make_vusion_label_copyable(label, value, bg_color)
+    
+    def _make_vusion_label_copyable(self, label, value, bg_color):
+        """Make a label copyable with click and hover effects."""
+        def copy_value(e=None):
+            if value and value != 'N/A':
+                self.parent.clipboard_clear()
+                self.parent.clipboard_append(value)
+                original_fg = label['fg']
+                label.config(fg="#28A745")
+                self.parent.after(500, lambda: label.config(fg=original_fg))
+        
+        label.bind("<Button-1>", copy_value)
+        
+        def on_enter(e):
+            if value != 'N/A':
+                label.config(bg="#E9ECEF")
+        
+        def on_leave(e):
+            label.config(bg=bg_color)
+        
+        label.bind("<Enter>", on_enter)
+        label.bind("<Leave>", on_leave)
+    
+    def _show_vusion_error(self, error_message):
+        """Show error message in Vusion tab."""
+        for widget in self.vusion_events_frame.winfo_children():
+            widget.destroy()
+        
+        tk.Label(self.vusion_events_frame, text=f"⚠ {error_message}",
+                font=('Segoe UI', 10), bg="#FFFFFF", fg="#DC3545").pack(pady=20)
+    
+    def _refresh_vusion_events(self):
+        """Refresh Vusion events list."""
+        self._log("Refreshing Vusion events...")
+        self._load_vusion_events_background()
+    
+    def _apply_vusion_filters(self):
+        """Apply filters to Vusion events without reloading from API."""
+        if hasattr(self, 'vusion_events') and self.vusion_events:
+            self._display_vusion_events(self.vusion_events)
+    
+    def _copy_vusion_table(self):
+        """Copy entire Vusion events table to clipboard in tab-separated format."""
+        if not hasattr(self, 'vusion_events') or not self.vusion_events:
+            self._log("No events to copy", "warning")
+            return
+        
+        # Apply filters to get currently displayed events
+        filtered_events = self._filter_vusion_events(self.vusion_events)
+        
+        if not filtered_events:
+            self._log("No events match current filters", "warning")
+            return
+        
+        # Build tab-separated table
+        lines = []
+        
+        # Header row
+        lines.append("Date\tEvent Type\tStatus\tMessage")
+        
+        # Data rows
+        for event in filtered_events:
+            # Format date
+            date_str = event.get('creationDate', 'N/A')
+            if date_str != 'N/A' and 'T' in date_str:
+                date_str = date_str.replace('T', ' ').split('.')[0]
+            
+            # Format event type
+            event_type_raw = event.get('eventType', 'N/A')
+            event_type = event_type_raw.replace('_', ' ').title() if event_type_raw != 'N/A' else 'N/A'
+            
+            # Get status
+            status = event.get('status', '')
+            if not status and 'modifications' in event:
+                new_val = event.get('modifications', {}).get('newValue', {})
+                if 'connectivity.status' in new_val:
+                    status = new_val['connectivity.status']
+            if not status:
+                status = 'N/A'
+            
+            # Get message
+            message = event.get('message', 'N/A')
+            
+            # Add row (escape tabs and newlines in message)
+            message_clean = message.replace('\t', '  ').replace('\n', ' ').replace('\r', '')
+            lines.append(f"{date_str}\t{event_type}\t{status}\t{message_clean}")
+        
+        # Copy to clipboard
+        table_text = '\n'.join(lines)
+        self.parent.clipboard_clear()
+        self.parent.clipboard_append(table_text)
+        
+        self._log(f"Copied {len(filtered_events)} events to clipboard", "success")
+    
+    def _export_vusion_to_excel(self):
+        """Export Vusion events to Excel file with AP ID as sheet name."""
+        if not hasattr(self, 'vusion_events') or not self.vusion_events:
+            self._log("No events to export", "warning")
+            messagebox.showwarning("No Data", "No Vusion events to export.")
+            return
+        
+        # Apply filters to get currently displayed events
+        filtered_events = self._filter_vusion_events(self.vusion_events)
+        
+        if not filtered_events:
+            self._log("No events match current filters", "warning")
+            messagebox.showwarning("No Data", "No events match current filters.")
+            return
+        
+        # Try to import openpyxl
+        try:
+            from openpyxl import Workbook
+            from openpyxl.styles import Font, Alignment, PatternFill
+        except ImportError:
+            self._log("openpyxl not installed", "error")
+            messagebox.showerror("Missing Dependency", 
+                               "openpyxl is not installed. Install it using:\npip install openpyxl")
+            return
+        
+        # Get AP ID for sheet name
+        ap_id = "Unknown"
+        if self.active_ap_data:
+            ap_id = str(self.active_ap_data.get('ap_id', 'Unknown'))
+        
+        # Ask user for save location
+        from tkinter import filedialog
+        default_filename = f"Vusion_Events_AP_{ap_id}.xlsx"
+        filepath = filedialog.asksaveasfilename(
+            defaultextension=".xlsx",
+            filetypes=[("Excel files", "*.xlsx"), ("All files", "*.*")],
+            initialfile=default_filename,
+            title="Save Vusion Events"
+        )
+        
+        if not filepath:
+            return  # User cancelled
+        
+        try:
+            # Create workbook and worksheet with AP ID as sheet name
+            wb = Workbook()
+            ws = wb.active
+            # Sanitize sheet name (Excel limits: 31 chars, no special chars)
+            sheet_name = f"AP {ap_id}"[:31]
+            ws.title = sheet_name
+            
+            # Header styling
+            header_fill = PatternFill(start_color="3D6B9E", end_color="3D6B9E", fill_type="solid")
+            header_font = Font(bold=True, color="FFFFFF", size=11)
+            header_alignment = Alignment(horizontal="left", vertical="center")
+            
+            # Write headers
+            headers = ["Date", "Event Type", "Status", "Message"]
+            for col_idx, header in enumerate(headers, start=1):
+                cell = ws.cell(row=1, column=col_idx, value=header)
+                cell.fill = header_fill
+                cell.font = header_font
+                cell.alignment = header_alignment
+            
+            # Set column widths
+            ws.column_dimensions['A'].width = 20  # Date
+            ws.column_dimensions['B'].width = 30  # Event Type
+            ws.column_dimensions['C'].width = 15  # Status
+            ws.column_dimensions['D'].width = 50  # Message
+            
+            # Write data rows
+            for row_idx, event in enumerate(filtered_events, start=2):
+                # Format date
+                date_str = event.get('creationDate', 'N/A')
+                if date_str != 'N/A' and 'T' in date_str:
+                    date_str = date_str.replace('T', ' ').split('.')[0]
+                
+                # Format event type
+                event_type_raw = event.get('eventType', 'N/A')
+                event_type = event_type_raw.replace('_', ' ').title() if event_type_raw != 'N/A' else 'N/A'
+                
+                # Get status
+                status = event.get('status', '')
+                if not status and 'modifications' in event:
+                    new_val = event.get('modifications', {}).get('newValue', {})
+                    if 'connectivity.status' in new_val:
+                        status = new_val['connectivity.status']
+                if not status:
+                    status = 'N/A'
+                
+                # Get message
+                message = event.get('message', 'N/A')
+                
+                # Write cells
+                ws.cell(row=row_idx, column=1, value=date_str)
+                ws.cell(row=row_idx, column=2, value=event_type)
+                
+                # Status cell with color
+                status_cell = ws.cell(row=row_idx, column=3, value=status)
+                status_upper = status.upper()
+                if status_upper in ['ONLINE', 'SUCCESS']:
+                    status_cell.font = Font(bold=True, color="28A745")
+                elif status_upper in ['OFFLINE', 'ERROR']:
+                    status_cell.font = Font(bold=True, color="DC3545")
+                
+                ws.cell(row=row_idx, column=4, value=message)
+                
+                # Set alignment for all cells in row
+                for col_idx in range(1, 5):
+                    ws.cell(row=row_idx, column=col_idx).alignment = Alignment(
+                        horizontal="left", vertical="top", wrap_text=True
+                    )
+            
+            # Save workbook
+            wb.save(filepath)
+            self._log(f"Exported {len(filtered_events)} events to {filepath}", "success")
+            messagebox.showinfo("Export Successful", 
+                              f"Exported {len(filtered_events)} events to:\n{filepath}")
+        
+        except Exception as e:
+            self._log(f"Failed to export to Excel: {str(e)}", "error")
+            messagebox.showerror("Export Failed", f"Failed to export to Excel:\n{str(e)}")
     
     def _refresh_jira(self):
         """Refresh Jira ticket list."""
